@@ -33,10 +33,11 @@ export function useGame(app: App, route: (name: FxName, fx: FxEvent, state: Snap
   function onFx(name: FxName, fx: FxEvent) {
     const r = route(name, fx, state.value);
     if (r === 'ignore') return;
-    const sound = name === 'message:received' ? 'msg' : fx.level;
-    beep(sound);
+    const isMessage = name === 'message:received';
+    beep(isMessage ? (app === 'crew' ? 'radio' : 'msg') : fx.level);
     if (r === 'toast') return toast(fx.text ? `${fx.title} · ${fx.text}` : fx.title, fx.level);
-    if (fx.level === 'crit') vibrate([300, 120, 300, 120, 600]);
+    if (isMessage) vibrate([120, 60, 120, 60, 260]);
+    else if (fx.level === 'crit') vibrate([300, 120, 300, 120, 600]);
     else if (fx.level === 'warn') vibrate([200, 100, 200]);
     const id = ++seq;
     alerts.value = [...alerts.value.slice(-2), { ...fx, name, id }];

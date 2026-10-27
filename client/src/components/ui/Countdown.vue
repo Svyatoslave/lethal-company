@@ -15,6 +15,7 @@ const ms = computed(() => {
   if (props.deadline) return props.deadline - (props.pausedAt ?? props.now);
   return props.staticMs ?? null;
 });
+const text = computed(() => (ms.value === null ? '--:--' : mmss(ms.value)));
 const tone = computed(() => {
   if (ms.value === null) return 'idle';
   if (!props.deadline) return 'idle';
@@ -27,7 +28,7 @@ const tone = computed(() => {
 
 <template>
   <span class="cd tnum" :class="[size ?? 'md', tone, { paused: !!pausedAt && !!deadline }]">
-    {{ ms === null ? '--:--' : mmss(ms) }}
+    <span :class="{ long: text.length > 6 }">{{ text }}</span>
   </span>
 </template>
 
@@ -53,6 +54,11 @@ const tone = computed(() => {
   font-size: 13px;
   font-weight: 600;
   text-shadow: none;
+}
+/* Hours or overtime ("+1:12:02") are wider: shrink so the big timer never overflows a phone card. */
+.xl .long,
+.lg .long {
+  font-size: 0.66em;
 }
 .idle {
   color: var(--text-dim);

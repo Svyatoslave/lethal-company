@@ -4,7 +4,17 @@ import { useRoute, useRouter } from 'vue-router';
 import { useGame } from '../lib/game';
 import { api } from '../lib/api';
 import { setToken } from '../lib/session';
-import { beep, vibrate } from '../lib/sound';
+import {
+  audioReady, beep, keepAwake, keepAwakeSupported, muted, startKeepAwake, toggleKeepAwake, toggleMuted, unlockAudio, vibrate,
+} from '../lib/sound';
+
+const canVibrate = 'vibrate' in navigator;
+function testSignal() {
+  unlockAudio();
+  if (muted.value) toggleMuted();
+  beep('radio');
+  vibrate([120, 60, 120, 60, 260]);
+}
 import { CREW_LABEL, CREW_TONE, GATE_TONE, MISSION_LABEL, MISSION_TONE, clock, cr } from '../lib/format';
 import AlertLayer from '../components/AlertLayer.vue';
 import Logo from '../components/Logo.vue';
@@ -110,6 +120,7 @@ async function sendMsg(text = msg.value) {
 }
 
 onMounted(async () => {
+  startKeepAwake();
   const qCode = typeof route.query.code === 'string' ? route.query.code : '';
   const qClaim = typeof route.query.claim === 'string' ? route.query.claim : '';
   if (qClaim) {
@@ -151,8 +162,14 @@ onMounted(async () => {
         <b class="mono">{{ me?.callsign ?? '…' }}</b>
       </div>
       <span class="link mono" :class="{ on: connected }"><i />{{ connected ? 'LINK' : 'NO LINK' }}</span>
+      <button type="button" class="out mono" :class="{ off: muted }" @click="muted ? testSignal() : toggleMuted()">{{ muted ? 'ЗВУК ✕' : 'ЗВУК' }}</button>
       <button type="button" class="out mono" @click="logout">ВЫЙТИ</button>
     </header>
+
+    <button v-if="!audioReady || muted" type="button" class="unlock mono" @click="testSignal">
+      🔊 НАЖМИТЕ, ЧТОБЫ ВКЛЮЧИТЬ ЗВУК СИГНАЛОВ
+      <small>Без этого телефон не пискнет при сообщении. На iPhone выключите беззвучный режим.</small>
+    </button>
 
     <div class="strip mono">
       <span>{{ m?.code ?? 'NO MISSION' }}</span>
@@ -285,6 +302,20 @@ onMounted(async () => {
       </div>
     </section>
 
+    <section class="card">
+      <div class="label">СИГНАЛЫ УСТРОЙСТВА</div>
+      <div class="setup">
+        <TButton size="sm" variant="ghost" @click="testSignal">ПРОВЕРИТЬ СИГНАЛ</TButton>
+        <TButton v-if="keepAwakeSupported" size="sm" :variant="keepAwake ? 'primary' : 'ghost'" @click="toggleKeepAwake">
+          ЭКРАН НЕ ГАСНЕТ: {{ keepAwake ? 'ВКЛ' : 'ВЫКЛ' }}
+        </TButton>
+      </div>
+      <p class="mute small">
+        Звук и вибрация срабатывают, пока страница открыта на экране.
+        <template v-if="!canVibrate"> Этот браузер не поддерживает вибрацию (iPhone) — будет только звук.</template>
+      </p>
+    </section>
+
     <footer class="safety">
       ПРИ РЕАЛЬНОЙ ОПАСНОСТИ ИГРА ОСТАНАВЛИВАЕТСЯ. НЕ БЕГАЙТЕ В ТЕМНОТЕ. НЕ ПОКИДАЙТЕ ТЕРРИТОРИЮ.
     </footer>
@@ -378,6 +409,37 @@ onMounted(async () => {
 }
 .link.on {
   color: var(--acc);
+}
+.out.off {
+  color: var(--red);
+  border-color: var(--red);
+}
+.unlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px;
+  background: var(--amber);
+  color: #120900;
+  border: 0;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-align: left;
+  animation: blink 1.6s steps(2) infinite;
+}
+.unlock small {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.setup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .out {
   background: none;

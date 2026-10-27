@@ -664,13 +664,18 @@ export function tick() {
       });
     }
   }
-  const delivered = q.all<{ id: number; to_type: MessageTo; to_player_id: number | null; channel: string }>(
-    'SELECT id, to_type, to_player_id, channel FROM messages WHERE mission_id = ? AND deliver_at > ? AND deliver_at <= ?',
+  // Only delayed transmissions: instant ones were already announced by insertMessage.
+  const delivered = q.all<{ to_type: MessageTo; to_player_id: number | null; channel: string; body: string; from_role: Role; cs: string | null }>(
+    `SELECT msg.to_type, msg.to_player_id, msg.channel, msg.body, msg.from_role, p.callsign AS cs
+     FROM messages msg LEFT JOIN players p ON p.id = msg.from_player_id
+     WHERE msg.mission_id = ? AND msg.deliver_at > msg.created_at AND msg.deliver_at > ? AND msg.deliver_at <= ?`,
     m.id, lastDeliveryCheck, t,
   );
   lastDeliveryCheck = t;
   if (delivered.length) {
-    for (const msg of delivered) bus.emit('fx', messageFx(msg.to_type, msg.to_player_id));
+    for (const msg of delivered) {
+      bus.emit('fx', messageFx(msg.to_type, msg.to_player_id, senderLabel(msg.from_role, msg.channel, msg.cs), msg.body));
+    }
     bus.emit('changed');
   }
 }
@@ -681,10 +686,18 @@ function messageTargets(toType: MessageTo, toPlayerId: number | null): FxTarget[
   if (toType === 'crew') return ['crew', 'staff'];
   return toPlayerId ? [{ playerId: toPlayerId }, 'staff'] : ['staff'];
 }
-function messageFx(toType: MessageTo, toPlayerId: number | null) {
+function senderLabel(role: Role, channel: string, callsign: string | null) {
+  if (role === 'player') return callsign ?? 'CREW';
+  if (role === 'operator') return 'OPERATOR';
+  return channel === 'system' ? 'COMPANY' : 'FIELD ADMIN';
+}
+function messageFx(toType: MessageTo, toPlayerId: number | null, from: string, body: string) {
   return {
     name: 'message:received' as FxName,
-    payload: { type: 'message', level: 'info' as Level, title: 'INCOMING TRANSMISSION', targetPlayerId: toPlayerId, at: now() },
+    payload: {
+      type: 'message', level: 'info' as Level, title: `INCOMING TRANSMISSION · ${from}`,
+      text: body.length > 140 ? `${body.slice(0, 140)}…` : body, targetPlayerId: toPlayerId, at: now(),
+    },
     target: messageTargets(toType, toPlayerId),
   };
 }
@@ -1075,7 +1088,7 @@ function insertMessage(
     m.id, from.role, from.playerId, toType, toPlayerId, body, channel, now(), deliverAt,
   ).id;
   if (deliverAt <= now()) {
-    const f = messageFx(toType, toPlayerId);
+    const f = messageFx(toType, toPlayerId, from.role === 'player' ? from.label : senderLabel(from.role, channel, null), body);
     fx(f.name, f.payload, ...f.target);
   }
   return id;
