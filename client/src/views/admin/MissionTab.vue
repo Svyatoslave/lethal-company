@@ -9,8 +9,8 @@ const props = defineProps<{ game: Game }>();
 const { state, now, act, busy } = props.game;
 const m = computed(() => state.value?.mission ?? null);
 
-const draft = reactive({ name: 'NIGHT RAID', quota: 1000, startBalance: 300, durationMin: 15, overduePenalty: 50, crewSize: 4, copyLoot: true });
-const settings = reactive({ name: '', quota: 0, durationMin: 0, overduePenalty: 0, crewSize: 4 });
+const draft = reactive({ name: 'NIGHT RAID', quota: 1000, startBalance: 300, durationMin: 15, overdueDamage: 50, monsterDamage: 50, crewSize: 4, copyLoot: true });
+const settings = reactive({ name: '', quota: 0, durationMin: 0, overdueDamage: 50, crewSize: 4 });
 const showNew = ref(false);
 
 watch(
@@ -20,7 +20,7 @@ watch(
     settings.name = v.name;
     settings.quota = v.quota;
     settings.durationMin = Math.round((v.durationSec / 60) * 10) / 10;
-    settings.overduePenalty = v.overduePenalty;
+    settings.overdueDamage = v.overdueDamage;
     settings.crewSize = v.crewSize;
   },
   { immediate: true },
@@ -32,7 +32,8 @@ async function create() {
     quota: draft.quota,
     startBalance: draft.startBalance,
     durationSec: Math.round(draft.durationMin * 60),
-    overduePenalty: draft.overduePenalty,
+    overdueDamage: draft.overdueDamage,
+    monsterDamage: draft.monsterDamage,
     crewSize: draft.crewSize,
     copyLoot: draft.copyLoot,
   }, 'Миссия создана');
@@ -43,7 +44,7 @@ function save() {
     name: settings.name,
     quota: settings.quota,
     durationSec: Math.round(settings.durationMin * 60),
-    overduePenalty: settings.overduePenalty,
+    overdueDamage: settings.overdueDamage,
     crewSize: settings.crewSize,
   }, 'Настройки сохранены');
 }
@@ -77,7 +78,7 @@ function save() {
       <div class="a-grid2">
         <label class="field"><span class="label">Квота, CR</span><input v-model.number="settings.quota" class="input" type="number" min="0" /></label>
         <label class="field"><span class="label">Вылазка, мин</span><input v-model.number="settings.durationMin" class="input" type="number" min="0.5" step="0.5" /></label>
-        <label class="field"><span class="label">Штраф опоздания</span><input v-model.number="settings.overduePenalty" class="input" type="number" min="0" /></label>
+        <label class="field"><span class="label">Опоздание, −% HP</span><input v-model.number="settings.overdueDamage" class="input" type="number" min="0" max="100" /></label>
         <label class="field"><span class="label">Размер группы</span><input v-model.number="settings.crewSize" class="input" type="number" min="1" max="12" /></label>
       </div>
       <TButton block :busy="busy.has('save')" @click="save">СОХРАНИТЬ</TButton>
@@ -93,7 +94,8 @@ function save() {
         <label class="field"><span class="label">Квота, CR</span><input v-model.number="draft.quota" class="input" type="number" min="0" /></label>
         <label class="field"><span class="label">Стартовый баланс</span><input v-model.number="draft.startBalance" class="input" type="number" min="0" /></label>
         <label class="field"><span class="label">Вылазка, мин</span><input v-model.number="draft.durationMin" class="input" type="number" min="0.5" step="0.5" /></label>
-        <label class="field"><span class="label">Штраф опоздания</span><input v-model.number="draft.overduePenalty" class="input" type="number" min="0" /></label>
+        <label class="field"><span class="label">Опоздание, −% HP</span><input v-model.number="draft.overdueDamage" class="input" type="number" min="0" max="100" /></label>
+        <label class="field"><span class="label">Удар монстра, −% HP</span><input v-model.number="draft.monsterDamage" class="input" type="number" min="0" max="100" /></label>
         <label class="field"><span class="label">Размер группы</span><input v-model.number="draft.crewSize" class="input" type="number" min="1" max="12" /></label>
       </div>
       <label v-if="m" class="check"><input v-model="draft.copyLoot" type="checkbox" /> Перенести предметы (те же QR-метки)</label>

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import type { Game } from '../../lib/game';
 import type { MonsterActionType } from '@shared/types';
 import { clock } from '../../lib/format';
 import TPanel from '../../components/ui/TPanel.vue';
 import TButton from '../../components/ui/TButton.vue';
+import MessageList from '../../components/MessageList.vue';
 
 const props = defineProps<{ game: Game }>();
-const { state, act, busy } = props.game;
+const { state, now, act, busy } = props.game;
 const m = computed(() => state.value?.mission ?? null);
 const monsters = computed(() => state.value?.players.filter((p) => p.role === 'monster') ?? []);
 const crew = computed(() =>
@@ -15,10 +16,33 @@ const crew = computed(() =>
     (a, b) => Number(b.status !== 'AT_BASE') - Number(a.status !== 'AT_BASE'),
   ),
 );
-const monsterId = ref<number | null>(null);
+
+// ---- monster damage / rage
+const rage = computed(() => (m.value?.monsterDamage ?? 0) >= 100);
+const customDamage = ref(50);
+watch(() => m.value?.monsterDamage, (d) => d !== undefined && (customDamage.value = d), { immediate: true });
+const setDamage = (d: number, ok: string) => act('dmg', 'PATCH', '/missions/current', { monsterDamage: d }, ok);
+
+// ---- private chat with monsters (monsters act on their own; this is their only line)
+const chatWith = ref<number | null>(null);
+watch(monsters, (list) => {
+  if (!list.some((x) => x.id === chatWith.value)) chatWith.value = list[0]?.id ?? null;
+}, { immediate: true });
+const chat = computed(() =>
+  (state.value?.messages ?? []).filter(
+    (x) => (x.toType === 'player' && x.toPlayerId === chatWith.value) || (x.fromRole === 'player' && x.toType === 'admin' && x.fromCallsign === monsters.value.find((mo) => mo.id === chatWith.value)?.callsign),
+  ),
+);
+const reply = ref('');
+async function sendReply() {
+  if (!chatWith.value || !reply.value.trim()) return;
+  const r = await act('mchat', 'POST', '/messages', { toType: 'player', toPlayerId: chatWith.value, body: reply.value });
+  if (r) reply.value = '';
+}
+
+// ---- atmospheric threat events (not orders: monsters decide for themselves)
 const targetId = ref<number | null>(null);
 const text = ref('');
-
 // Effects are deliberately static and safe: standing still, silence, walking — never running or contact.
 const EFFECTS = [
   'ЗАМРИ на 15 секунд',
@@ -28,12 +52,9 @@ const EFFECTS = [
   'ДЕЗОРИЕНТАЦИЯ: медленно повернись 3 раза',
   'ОТХОД: вернись к последнему ориентиру шагом',
 ];
-const ORDERS = ['Займи позицию у сарая', 'Издай звук и замри', 'Медленно пройди мимо группы', 'Спрячься и жди 2 минуты', 'Вернись на исходную'];
-
 function fire(action: MonsterActionType) {
   void act(`m-${action}`, 'POST', '/admin/monster', {
     action,
-    monsterId: monsterId.value ?? undefined,
     targetPlayerId: targetId.value ?? undefined,
     text: text.value || undefined,
   }, 'Событие отправлено').then((r) => {
@@ -44,6 +65,7 @@ function fire(action: MonsterActionType) {
 const pending = computed(() => state.value?.purchases.filter((p) => ['scanner', 'extraction'].includes(p.itemKey) && !p.fulfilledAt) ?? []);
 const hints = reactive<Record<number, string>>({});
 const LABEL: Record<string, string> = { warning: 'WARNING', spawn: 'SPAWN', effect: 'EFFECT', false_alarm: 'FALSE ALARM', order: 'ORDER' };
+const KIND: Record<string, string> = { hit: 'УДАР', overdue: 'ОПОЗДАНИЕ', medkit: 'MEDKIT', admin: 'ВЕДУЩИЙ' };
 </script>
 
 <template>
@@ -54,12 +76,42 @@ const LABEL: Record<string, string> = { warning: 'WARNING', spawn: 'SPAWN', effe
       <TButton class="top" variant="warn" block :disabled="!hints[p.id]?.trim()" :busy="busy.has(`sc${p.id}`)" @click="act(`sc${p.id}`, 'POST', `/purchases/${p.id}/scanner`, { hint: hints[p.id] }, 'Подсказка отправлена оператору')">ОТПРАВИТЬ РЕЗУЛЬТАТ СКАНА</TButton>
     </template>
     <template v-else>
-      <p class="a-note">Куплена экстренная эвакуация. Все за шлюзом получат приказ вернуться шагом, штрафы за опоздание в этой вылазке отменяются.</p>
+      <p class="a-note">Куплена экстренная эвакуация. Все за шлюзом получат приказ вернуться шагом, урон за опоздание в этой вылазке отменяется.</p>
       <TButton class="top" variant="danger" size="lg" block confirm="ЭВАКУАЦИЯ?" :busy="busy.has(`ev${p.id}`)" @click="act(`ev${p.id}`, 'POST', `/purchases/${p.id}/extraction`)">ИНИЦИИРОВАТЬ ЭВАКУАЦИЮ</TButton>
     </template>
   </TPanel>
 
-  <TPanel title="THREAT LEVEL" code="T-01">
+  <TPanel title="УРОН МОНСТРОВ" code="T-00" :tone="rage ? 'crit' : undefined">
+    <div class="dmg mono" :class="{ rage }">{{ m?.monsterDamage ?? 0 }}% <small>HP ЗА УДАР</small></div>
+    <div class="a-grid2">
+      <TButton :variant="!rage ? 'solid' : 'ghost'" size="lg" :disabled="!m || m.monsterDamage === 50" :busy="busy.has('dmg')" @click="setDamage(50, 'Урон монстров: 50%')">ОБЫЧНЫЙ 50%</TButton>
+      <TButton variant="danger" size="lg" :disabled="!m || rage" confirm="ВСЕМ ПРИДЁТ ТРЕВОГА. ДА?" :busy="busy.has('dmg')" @click="setDamage(100, 'Ярость включена')">ЯРОСТЬ 100%</TButton>
+    </div>
+    <div class="row top">
+      <input v-model.number="customDamage" class="input grow" type="number" min="0" max="100" />
+      <TButton variant="ghost" :busy="busy.has('dmg')" @click="setDamage(customDamage, `Урон монстров: ${customDamage}%`)">ЗАДАТЬ %</TButton>
+    </div>
+    <p class="a-note top">Любое изменение урона объявляется всем устройствам. Ярость — для финала игры: один удар забирает всё здоровье.</p>
+  </TPanel>
+
+  <TPanel title="ЧАТ С МОНСТРАМИ" code="T-01">
+    <div v-if="!monsters.length" class="empty">// НЕТ МОНСТРОВ. НАЗНАЧЬТЕ РОЛЬ MONSTER ВО ВКЛАДКЕ CREW.</div>
+    <template v-else>
+      <div class="a-chips">
+        <button v-for="mo in monsters" :key="mo.id" type="button" class="a-chip red" :class="{ on: chatWith === mo.id }" @click="chatWith = mo.id">
+          {{ mo.callsign }}{{ mo.online ? '' : ' ✕' }}
+        </button>
+      </div>
+      <div class="chat top"><MessageList :messages="chat" role="admin" :now="now" /></div>
+      <form class="row top" @submit.prevent="sendReply">
+        <input v-model="reply" class="input grow" maxlength="500" placeholder="ЛИЧНОЕ СООБЩЕНИЕ МОНСТРУ" />
+        <TButton :disabled="!reply.trim() || !chatWith" :busy="busy.has('mchat')" @click="sendReply">TX</TButton>
+      </form>
+      <p class="a-note top">Монстры действуют сами и сами отмечают удары. Этот чат видят только вы и монстр — оператор его не видит.</p>
+    </template>
+  </TPanel>
+
+  <TPanel title="THREAT LEVEL" code="T-02">
     <div class="lvls">
       <button
         v-for="l in 6" :key="l" type="button" class="lv mono" :class="{ on: (m?.threatLevel ?? 0) === l - 1, hot: l - 1 >= 4 }"
@@ -68,18 +120,8 @@ const LABEL: Record<string, string> = { warning: 'WARNING', spawn: 'SPAWN', effe
     </div>
   </TPanel>
 
-  <TPanel title="THREAT CONTROL" code="T-02">
+  <TPanel title="СОБЫТИЯ УГРОЗЫ" code="T-03">
     <div class="stack">
-      <div class="field">
-        <span class="label">Активный монстр</span>
-        <div class="a-chips">
-          <button type="button" class="a-chip" :class="{ on: monsterId === null }" @click="monsterId = null">—</button>
-          <button v-for="mo in monsters" :key="mo.id" type="button" class="a-chip red" :class="{ on: monsterId === mo.id }" @click="monsterId = mo.id">
-            {{ mo.callsign }}{{ mo.online ? '' : ' ✕' }}
-          </button>
-        </div>
-        <span v-if="!monsters.length" class="a-sub">Нет монстров: назначьте роль MONSTER во вкладке CREW.</span>
-      </div>
       <div class="field">
         <span class="label">Цель</span>
         <div class="a-chips">
@@ -102,24 +144,25 @@ const LABEL: Record<string, string> = { warning: 'WARNING', spawn: 'SPAWN', effe
         <TButton variant="danger" size="lg" :disabled="!targetId" :busy="busy.has('m-effect')" @click="fire('effect')">ЭФФЕКТ НА ЦЕЛЬ</TButton>
         <TButton variant="ghost" size="lg" :busy="busy.has('m-false_alarm')" @click="fire('false_alarm')">ЛОЖНАЯ ТРЕВОГА</TButton>
       </div>
-      <div class="hr" />
-      <div class="field">
-        <span class="label">Приказ монстру (виден только ему)</span>
-        <div class="a-chips">
-          <button v-for="o in ORDERS" :key="o" type="button" class="a-chip preset" @click="text = o">{{ o }}</button>
-        </div>
-      </div>
-      <TButton size="lg" block :disabled="!monsterId || !text.trim()" :busy="busy.has('m-order')" @click="fire('order')">ОТПРАВИТЬ ПРИКАЗ</TButton>
       <p class="a-note a-warn">Только безопасные игровые эффекты: шагом, без физического контакта, в пределах территории.</p>
     </div>
   </TPanel>
 
-  <TPanel title="ЖУРНАЛ УГРОЗ" code="T-03">
+  <TPanel title="ЖУРНАЛ ЗДОРОВЬЯ" code="T-04">
+    <div v-if="!state?.health.length" class="empty">// ВСЕ ЗДОРОВЫ</div>
+    <div v-for="h in state?.health ?? []" :key="h.id" class="ma mono">
+      <span class="mute">{{ clock(h.createdAt, false) }}</span>
+      <b :class="h.delta < 0 ? 'red' : 'acc'">{{ h.delta > 0 ? '+' : '' }}{{ h.delta }}%</b>
+      <span>{{ h.callsign }} → {{ h.hpAfter }}%</span>
+      <span class="dim">{{ KIND[h.kind] ?? h.kind }}<template v-if="h.kind === 'hit'"> · {{ h.actor }}</template></span>
+    </div>
+  </TPanel>
+
+  <TPanel title="ЖУРНАЛ СОБЫТИЙ УГРОЗЫ" code="T-05">
     <div v-if="!state?.monsterActions.length" class="empty">// ПУСТО</div>
     <div v-for="a in state?.monsterActions ?? []" :key="a.id" class="ma mono">
       <span class="mute">{{ clock(a.createdAt, false) }}</span>
       <b>{{ LABEL[a.action] }}</b>
-      <span v-if="a.monster" class="red">{{ a.monster }}</span>
       <span v-if="a.target">→ {{ a.target }}</span>
       <span class="dim">{{ a.text }}</span>
     </div>
@@ -129,6 +172,25 @@ const LABEL: Record<string, string> = { warning: 'WARNING', spawn: 'SPAWN', effe
 <style scoped>
 .top {
   margin-top: 10px;
+}
+.dmg {
+  font-size: 44px;
+  font-weight: 800;
+  color: var(--amber);
+  margin-bottom: 10px;
+}
+.dmg small {
+  font-size: 13px;
+  color: var(--text-mute);
+}
+.dmg.rage {
+  color: var(--red);
+  animation: blink 1s steps(2) infinite;
+}
+.chat {
+  height: 260px;
+  border: 1px solid var(--line);
+  background: #040605;
 }
 .lvls {
   display: grid;

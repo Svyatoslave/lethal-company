@@ -6,6 +6,7 @@ import TPanel from '../../components/ui/TPanel.vue';
 import TButton from '../../components/ui/TButton.vue';
 import TChip from '../../components/ui/TChip.vue';
 import Countdown from '../../components/ui/Countdown.vue';
+import HpBar from '../../components/ui/HpBar.vue';
 
 const props = defineProps<{ game: Game }>();
 const emit = defineEmits<{ watch: [playerId: number] }>();
@@ -56,7 +57,7 @@ async function form() {
             <th>STATUS</th>
             <th>EXIT</th>
             <th>DEADLINE</th>
-            <th>PEN</th>
+            <th>HP</th>
             <th class="act" />
           </tr>
         </thead>
@@ -80,8 +81,7 @@ async function form() {
               <span v-else class="mute mono">—</span>
             </td>
             <td>
-              <span v-if="p.penalties" class="pen mono">▲×{{ p.penalties }}</span>
-              <span v-else class="mute mono">—</span>
+              <HpBar :hp="p.hp" size="sm" />
             </td>
             <td class="act" @click.stop>
               <TButton

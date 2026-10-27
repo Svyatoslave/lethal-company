@@ -100,7 +100,8 @@ export function attachRealtime(server: http.Server | https.Server) {
   io.on('connection', (socket: Socket) => {
     const actor = socket.data.actor as Actor;
     if (actor.role === 'player') {
-      socket.join(['crew', `player:${actor.playerId}`]);
+      // Monsters get their own room: crew-wide broadcasts (radio, Company notices, threat warnings) are not for them.
+      socket.join([actor.playerRole === 'monster' ? 'monsters' : 'crew', `player:${actor.playerId}`]);
       presence.connected(actor.playerId!);
     } else {
       socket.join(actor.role);

@@ -81,20 +81,7 @@ const EFFECT_HINT: Record<string, string> = { time_ext: 'секунд', medkit: 
     </div>
   </TPanel>
 
-  <TPanel title="ШТРАФЫ" code="$-03">
-    <div v-if="!state?.penalties.length" class="empty">// ШТРАФОВ НЕТ</div>
-    <div v-for="p in state?.penalties ?? []" :key="p.id" class="a-item">
-      <div class="row">
-        <span class="grow">
-          <b class="mono">{{ p.callsign }}</b> · {{ p.reason }}<template v-if="p.amount"> · −{{ p.amount }} CR</template>
-          <div class="a-sub">{{ clock(p.createdAt) }}<template v-if="p.clearedAt"> · снят: {{ p.clearedNote }}</template></div>
-        </span>
-        <TButton v-if="!p.clearedAt" size="sm" variant="warn" confirm="СНЯТЬ?" :busy="busy.has(`pen${p.id}`)" @click="act(`pen${p.id}`, 'POST', `/penalties/${p.id}/cancel`)">ОТМЕНИТЬ</TButton>
-      </div>
-    </div>
-  </TPanel>
-
-  <TPanel title="ИСТОРИЯ ОПЕРАЦИЙ" code="$-04">
+  <TPanel title="ИСТОРИЯ ОПЕРАЦИЙ" code="$-03">
     <div v-for="t in state?.transactions ?? []" :key="t.id" class="tx" :class="{ rev: t.reversedById }">
       <span class="amt mono" :class="t.amount >= 0 ? 'acc' : 'red'">{{ t.amount >= 0 ? '+' : '' }}{{ cr(t.amount) }}</span>
       <span class="grow d">

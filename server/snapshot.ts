@@ -6,14 +6,14 @@ import {
 } from './game.js';
 import type {
   CrewStatus, EpStatus, EventView, ExpeditionView, LootView, MessageView, MissionView, MonsterActionView,
-  PenaltyView, PlayerView, Role, Snapshot, ShopItemView, PurchaseView, TxView, Visibility, Level, MessageTo, Channel,
+  HealthEventView, HealthKind, PlayerView, Role, Snapshot, ShopItemView, PurchaseView, TxView, Visibility, Level, MessageTo, Channel,
   MonsterActionType, PlayerRole,
 } from '../shared/types.js';
 
 function missionView(m: MissionRow): MissionView {
   return {
     id: m.id, code: m.code, name: m.name, status: m.status as MissionView['status'], quota: m.quota,
-    startBalance: m.start_balance, durationSec: m.duration_sec, overduePenalty: m.overdue_penalty, crewSize: m.crew_size,
+    startBalance: m.start_balance, durationSec: m.duration_sec, overdueDamage: m.overdue_damage, monsterDamage: m.monster_damage, crewSize: m.crew_size,
     gate: m.gate as MissionView['gate'], threatLevel: m.threat_level, commsRadio: !!m.comms_radio,
     commsDisabled: !!m.comms_disabled, camsUnlocked: !!m.cams_unlocked, messageDelaySec: m.message_delay_sec, timeBonusSec: m.time_bonus_sec,
     pauseReason: m.pause_reason, startedAt: m.started_at, pausedAt: m.paused_at, pausedTotalMs: m.paused_total_ms,
@@ -45,18 +45,16 @@ const EP_TO_CREW: Record<EpStatus, CrewStatus> = {
 
 function playersView(m: MissionRow | undefined, exp: ExpeditionView | null, withCodes: boolean): PlayerView[] {
   const rows = q.all<PlayerRow>('SELECT * FROM players WHERE active = 1 ORDER BY role, id');
-  const pen = new Map<number, number>();
-  if (m) {
-    for (const r of q.all<{ player_id: number; c: number }>(
-      'SELECT player_id, COUNT(*) AS c FROM penalties WHERE mission_id = ? AND cleared_at IS NULL GROUP BY player_id', m.id,
-    )) pen.set(r.player_id, r.c);
-  }
+  // Players without a health row are at full HP.
+  const hp = new Map<number, number>(
+    m ? q.all<{ player_id: number; hp: number }>('SELECT player_id, hp FROM health WHERE mission_id = ?', m.id).map((r) => [r.player_id, r.hp]) : [],
+  );
   const live = exp && exp.status !== 'completed' ? exp : null;
   return rows.map((p) => {
     const ep = live?.players.find((x) => x.playerId === p.id);
     return {
       id: p.id, callsign: p.callsign, role: p.role as PlayerRole, joinCode: withCodes ? p.join_code : undefined,
-      status: ep ? EP_TO_CREW[ep.status] : 'AT_BASE', penalties: pen.get(p.id) ?? 0, online: presence.isOnline(p.id), camOn: presence.isCamOn(p.id),
+      status: ep ? EP_TO_CREW[ep.status] : 'AT_BASE', hp: hp.get(p.id) ?? 100, online: presence.isOnline(p.id), camOn: presence.isCamOn(p.id),
       exitAt: ep?.exitAt ?? null, deadlineAt: ep?.deadlineAt ?? null,
     };
   });
@@ -107,10 +105,21 @@ function monsterActionsView(missionId: number, where: string, params: number[]):
   }));
 }
 
+function healthView(missionId: number, where: string, params: number[], limit: number): HealthEventView[] {
+  return q.all<{ id: number; player_id: number; callsign: string; delta: number; hp_after: number; kind: HealthKind; reason: string; actor: string; created_at: number }>(
+    `SELECT h.*, p.callsign FROM health_events h JOIN players p ON p.id = h.player_id
+     WHERE h.mission_id = ? AND (${where}) ORDER BY h.id DESC LIMIT ${limit}`,
+    missionId, ...params,
+  ).map((h) => ({
+    id: h.id, playerId: h.player_id, callsign: h.callsign, delta: h.delta, hpAfter: h.hp_after, kind: h.kind,
+    reason: h.reason, actor: h.actor, createdAt: h.created_at,
+  }));
+}
+
 function emptySnapshot(role: Role, t: number): Snapshot {
   return {
     serverNow: t, role, me: null, mission: null, raidActive: false, balance: 0, quotaProgress: 0, lootStats: { total: 0, found: 0, extracted: 0 },
-    expedition: null, players: [], penalties: [], loot: [], transactions: [], shop: [], purchases: [], messages: [],
+    expedition: null, players: [], health: [], loot: [], transactions: [], shop: [], purchases: [], messages: [],
     events: [], monsterActions: [],
   };
 }
@@ -138,10 +147,7 @@ export function staffSnapshot(role: 'admin' | 'operator'): Snapshot {
   s.lootStats = lootStats(m.id);
   s.expedition = exp ? expeditionView(exp) : null;
   s.players = playersView(m, s.expedition, isAdmin);
-  s.penalties = q.all<{ id: number; player_id: number; callsign: string; reason: string; amount: number; created_at: number; cleared_at: number | null; cleared_note: string | null }>(
-    'SELECT pe.*, p.callsign FROM penalties pe JOIN players p ON p.id = pe.player_id WHERE pe.mission_id = ? ORDER BY pe.id DESC',
-    m.id,
-  ).map((p) => ({ id: p.id, playerId: p.player_id, callsign: p.callsign, reason: p.reason, amount: p.amount, createdAt: p.created_at, clearedAt: p.cleared_at, clearedNote: p.cleared_note }));
+  s.health = healthView(m.id, '1 = 1', [], 200);
   s.loot = q.all<LootRow & { callsign: string | null }>(
     'SELECT l.*, p.callsign FROM loot l LEFT JOIN players p ON p.id = l.found_by WHERE l.mission_id = ? ORDER BY l.code', m.id,
   ).map(lootView);
@@ -161,7 +167,12 @@ export function staffSnapshot(role: 'admin' | 'operator'): Snapshot {
   }));
   s.messages = isAdmin
     ? messagesView(m.id, '1 = 1', [], t)
-    : messagesView(m.id, "(msg.to_type <> 'admin' AND msg.deliver_at <= ?) OR msg.from_role = 'operator'", [t], t);
+    : messagesView(
+        m.id,
+        // The operator never sees the private monster ⇄ admin chat.
+        "((msg.to_type <> 'admin' AND msg.deliver_at <= ?) OR msg.from_role = 'operator') AND COALESCE(tp.role, '') <> 'monster' AND COALESCE(fp.role, '') <> 'monster'",
+        [t], t,
+      );
   s.events = eventsView(m.id, isAdmin ? ['all', 'staff', 'admin'] : ['all', 'staff'], isAdmin ? 400 : 150);
   s.monsterActions = isAdmin ? monsterActionsView(m.id, '1 = 1', []) : [];
   return s;
@@ -185,19 +196,19 @@ export function playerSnapshot(playerId: number): Snapshot {
   // Crew see their own expedition only; monsters see the field roster to know who is out.
   s.expedition = ev && (p.role === 'monster' || ev.players.some((x) => x.playerId === p.id)) ? ev : null;
   s.players = playersView(m, ev, false).filter((x) => x.id === p.id || (p.role === 'monster' && x.role === 'crew'));
-  s.penalties = q.all<{ id: number; reason: string; amount: number; created_at: number; cleared_at: number | null; cleared_note: string | null }>(
-    'SELECT * FROM penalties WHERE mission_id = ? AND player_id = ? ORDER BY id DESC', m.id, p.id,
-  ).map((x): PenaltyView => ({ id: x.id, playerId: p.id, callsign: p.callsign, reason: x.reason, amount: x.amount, createdAt: x.created_at, clearedAt: x.cleared_at, clearedNote: x.cleared_note }));
+  s.health = healthView(m.id, 'h.player_id = ?', [p.id], 30);
   s.loot = q.all<LootRow & { callsign: string | null }>(
     'SELECT l.*, p.callsign FROM loot l LEFT JOIN players p ON p.id = l.found_by WHERE l.mission_id = ? AND l.found_by = ? ORDER BY l.found_at DESC',
     m.id, p.id,
   ).map(lootView);
-  s.messages = messagesView(
-    m.id,
-    "(msg.deliver_at <= ? AND ((msg.to_type = 'player' AND msg.to_player_id = ?) OR msg.to_type = 'crew')) OR msg.from_player_id = ?",
-    [t, p.id, p.id], t,
-  );
+  s.messages = p.role === 'monster'
+    // Monsters only have their private chat with the field admin.
+    ? messagesView(m.id, "(msg.to_type = 'player' AND msg.to_player_id = ?) OR msg.from_player_id = ?", [p.id, p.id], t)
+    : messagesView(
+        m.id,
+        "(msg.deliver_at <= ? AND ((msg.to_type = 'player' AND msg.to_player_id = ?) OR msg.to_type = 'crew')) OR msg.from_player_id = ?",
+        [t, p.id, p.id], t,
+      );
   s.events = eventsView(m.id, ['all'], 40);
-  s.monsterActions = p.role === 'monster' ? monsterActionsView(m.id, 'a.monster_id = ?', [p.id]) : [];
   return s;
 }
