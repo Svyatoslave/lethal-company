@@ -174,6 +174,8 @@ export interface Snapshot {
   role: Role;
   me: { playerId: number; callsign: string; role: PlayerRole } | null;
   mission: MissionView | null;
+  /** An expedition is in the field right now (for every role, even players not in it). Loot scanning is locked. */
+  raidActive: boolean;
   balance: number;
   quotaProgress: number;
   lootStats: { total: number; found: number; extracted: number };

@@ -1,7 +1,7 @@
 import { q } from './db.js';
 import { presence } from './presence.js';
 import {
-  balanceOf, currentMission, latestExpedition, quotaProgressOf,
+  balanceOf, currentExpedition, currentMission, latestExpedition, quotaProgressOf,
   type ExpeditionRow, type LootRow, type MissionRow, type PlayerRow, type PurchaseRow, type ShopRow, type TxRow,
 } from './game.js';
 import type {
@@ -109,7 +109,7 @@ function monsterActionsView(missionId: number, where: string, params: number[]):
 
 function emptySnapshot(role: Role, t: number): Snapshot {
   return {
-    serverNow: t, role, me: null, mission: null, balance: 0, quotaProgress: 0, lootStats: { total: 0, found: 0, extracted: 0 },
+    serverNow: t, role, me: null, mission: null, raidActive: false, balance: 0, quotaProgress: 0, lootStats: { total: 0, found: 0, extracted: 0 },
     expedition: null, players: [], penalties: [], loot: [], transactions: [], shop: [], purchases: [], messages: [],
     events: [], monsterActions: [],
   };
@@ -132,6 +132,7 @@ export function staffSnapshot(role: 'admin' | 'operator'): Snapshot {
   const isAdmin = role === 'admin';
   const exp = latestExpedition(m.id);
   s.mission = missionView(m);
+  s.raidActive = currentExpedition(m.id)?.status === 'active';
   s.balance = balanceOf(m.id);
   s.quotaProgress = quotaProgressOf(m.id);
   s.lootStats = lootStats(m.id);
@@ -175,6 +176,7 @@ export function playerSnapshot(playerId: number): Snapshot {
   const m = currentMission();
   if (!m) return s;
   s.mission = missionView(m);
+  s.raidActive = currentExpedition(m.id)?.status === 'active';
   s.balance = balanceOf(m.id);
   s.quotaProgress = quotaProgressOf(m.id);
   s.lootStats = lootStats(m.id);
