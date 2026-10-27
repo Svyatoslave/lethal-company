@@ -23,6 +23,7 @@ import AlertLayer from '../components/AlertLayer.vue';
 import Logo from '../components/Logo.vue';
 import MessageList from '../components/MessageList.vue';
 import Scanner from '../components/Scanner.vue';
+import TaskPanel from '../components/TaskPanel.vue';
 import TButton from '../components/ui/TButton.vue';
 import TChip from '../components/ui/TChip.vue';
 import Countdown from '../components/ui/Countdown.vue';
@@ -122,6 +123,11 @@ async function joinWith(c: string) {
 
 async function claim(token: string) {
   scanning.value = false;
+  if (token.startsWith('terminal:')) {
+    const r = await act('terminal', 'POST', `/terminals/${encodeURIComponent(token.slice(9))}/activate`);
+    if (r) { scan.value = { ok: true, title: 'ТЕРМИНАЛ ПОДКЛЮЧЁН · СВЯЖИТЕСЬ С ОПЕРАТОРОМ' }; beep('ok'); }
+    return;
+  }
   try {
     const r = await api<ClaimResult>('crew', 'POST', `/loot/${encodeURIComponent(token)}/claim`);
     if (r.result === 'identified') {
@@ -302,6 +308,8 @@ onMounted(async () => {
 
       <TButton variant="solid" size="xl" block :disabled="!!scanLock" @click="scan = null; scanning = true">◎ СКАНИРОВАТЬ ЛУТ</TButton>
       <div v-if="scanLock" class="scanlock mono">⊘ {{ scanLock }}</div>
+      <TButton size="lg" block :disabled="m?.status !== 'active'" @click="scan = null; scanning = true">◎ СКАНИРОВАТЬ ТЕРМИНАЛ</TButton>
+      <TaskPanel :game="game" employee />
       <TButton
         v-if="status === 'OUTSIDE'" variant="warn" size="lg" block
         :busy="busy.has('ret')" @click="act('ret', 'POST', '/expeditions/current/returning', {}, 'Оператор уведомлён')"

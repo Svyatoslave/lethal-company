@@ -13,6 +13,7 @@ import RaidPanel from './operator/RaidPanel.vue';
 import CrewPanel from './operator/CrewPanel.vue';
 import ScrapPanel from './operator/ScrapPanel.vue';
 import StorePanel from './operator/StorePanel.vue';
+import TaskPanel from '../components/TaskPanel.vue';
 import CommsPanel from './operator/CommsPanel.vue';
 import CamMonitor from './operator/CamMonitor.vue';
 
@@ -90,7 +91,8 @@ const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((sta
 
     <main class="grid">
       <div class="col">
-        <RaidPanel :game="game" />
+        <RaidPanel :game="game" class="raid" />
+        <TaskPanel :game="game" class="tasks" />
         <StorePanel :game="game" class="fill" />
       </div>
       <div class="col">
@@ -275,6 +277,17 @@ const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((sta
   height: 42%;
 }
 
+/* Leave room for the store; panel bodies scroll independently. */
+@media (min-width: 1281px) {
+  .col > .raid {
+    max-height: 40%;
+  }
+  .col > .tasks {
+    flex: 0 1 auto;
+    max-height: 30%;
+  }
+}
+
 @media (max-width: 1280px) {
   .term {
     height: auto;
@@ -293,6 +306,9 @@ const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((sta
     grid-column: 1 / -1;
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+  .col > .tasks {
+    max-height: 320px;
   }
   .col:nth-child(3) > * {
     height: 460px;

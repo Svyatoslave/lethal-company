@@ -96,6 +96,14 @@ api.patch('/loot/:id', as(ADMIN, (req, a) => g.updateLoot(req.params.id, req.bod
 api.delete('/loot/:id', as(ADMIN, (req, a) => g.deleteLoot(req.params.id, a)));
 api.get('/print', as(ADMIN, () => ({ loot: g.lootForPrint(), players: staffSnapshot('admin').players })));
 
+// cooperative terminals
+api.post('/tasks', as(ADMIN, (req, a) => g.saveTask(null, req.body ?? {}, a)));
+api.patch('/tasks/:id', as(ADMIN, (req, a) => g.saveTask(req.params.id, req.body ?? {}, a)));
+api.delete('/tasks/:id', as(ADMIN, (req, a) => g.deleteTask(req.params.id, a)));
+api.post('/tasks/:id/release', as(ADMIN, (req, a) => g.releaseTask(req.params.id, a)));
+api.post('/terminals/:token/activate', as(['player'], (req, a) => g.activateTask(req.params.token, a)));
+api.post('/tasks/:id/answer', as(['player'], (req, a) => g.solveTask(req.params.id, req.body?.answer, a)));
+
 // store & economy
 api.post('/shop/:itemId/purchase', as(STAFF, (req, a) => g.purchase(req.params.itemId, req.body ?? {}, a)));
 api.patch('/shop/:itemId', as(ADMIN, (req, a) => g.updateShopItem(req.params.itemId, req.body ?? {}, a)));
