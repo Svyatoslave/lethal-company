@@ -77,7 +77,7 @@ export function actorFor(token: unknown): Actor | null {
   if (s.role === 'player') {
     const p = q.get<PlayerRow>('SELECT * FROM players WHERE id = ? AND active = 1', s.player_id);
     if (!p) return null;
-    return { role: 'player', playerId: p.id, label: p.callsign };
+    return { role: 'player', playerId: p.id, label: p.callsign, playerRole: p.role === 'monster' ? 'monster' : 'crew' };
   }
   return { role: s.role, playerId: null, label: s.role === 'admin' ? 'FIELD ADMIN' : 'OPERATOR' };
 }

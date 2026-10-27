@@ -13,7 +13,7 @@ const { state, act, busy } = props.game;
 const m = computed(() => state.value?.mission ?? null);
 const balance = computed(() => state.value?.balance ?? 0);
 const items = computed(() => state.value?.shop ?? []);
-const injured = computed(() => state.value?.players.filter((p) => p.role === 'crew' && p.penalties > 0) ?? []);
+const injured = computed(() => state.value?.players.filter((p) => p.role === 'crew' && p.hp < 100) ?? []);
 const pending = computed(() => state.value?.purchases.filter((p) => ['scanner', 'extraction'].includes(p.itemKey) && !p.fulfilledAt) ?? []);
 const target = reactive<Record<number, number | ''>>({});
 // One idempotency key per intended purchase: retries reuse it, a completed purchase rotates it.
@@ -26,7 +26,7 @@ function blocker(i: ShopItemView): string | null {
   if (i.key === 'radio' && m.value.commsRadio) return 'УСТАНОВЛЕНО';
   if (i.key === 'bodycam' && m.value.camsUnlocked) return 'УСТАНОВЛЕНО';
   if (balance.value < i.price) return 'НЕТ CR';
-  if (i.key === 'medkit' && !target[i.id]) return injured.value.length ? 'ВЫБЕРИТЕ' : 'НЕТ ШТРАФОВ';
+  if (i.key === 'medkit' && !target[i.id]) return injured.value.length ? 'ВЫБЕРИТЕ' : 'ВСЕ ЗДОРОВЫ';
   return null;
 }
 
@@ -60,7 +60,7 @@ const effectNote = (i: ShopItemView) =>
         <div class="row">
           <select v-if="i.key === 'medkit'" v-model="target[i.id]" class="select grow sel">
             <option value="">— КОМУ —</option>
-            <option v-for="p in injured" :key="p.id" :value="p.id">{{ p.callsign }} (▲×{{ p.penalties }})</option>
+            <option v-for="p in injured" :key="p.id" :value="p.id">{{ p.callsign }} (HP {{ p.hp }}%)</option>
           </select>
           <span v-else class="grow" />
           <TButton

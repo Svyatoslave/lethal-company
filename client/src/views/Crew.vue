@@ -2,7 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useGame } from '../lib/game';
-import { api } from '../lib/api';
+import { api, requestId } from '../lib/api';
+import { toast } from '../lib/toast';
 import { setToken } from '../lib/session';
 import {
   audioReady, beep, keepAwake, keepAwakeSupported, muted, startKeepAwake, toggleKeepAwake, toggleMuted, unlockAudio, vibrate,
@@ -26,13 +27,14 @@ import TButton from '../components/ui/TButton.vue';
 import TChip from '../components/ui/TChip.vue';
 import Countdown from '../components/ui/Countdown.vue';
 import Meter from '../components/ui/Meter.vue';
+import HpBar from '../components/ui/HpBar.vue';
 
 const route = useRoute();
 const router = useRouter();
 
 const game = useGame('crew', (name, fx, s) => {
   const me = s?.me;
-  if (name === 'monster:event' && (me?.role === 'monster') !== (fx.type === 'order')) return 'ignore';
+  if (name === 'monster:event' && me?.role === 'monster') return 'ignore';
   if (name === 'gate:closed' || name === 'mission:updated') return 'toast';
   return 'alert';
 });
@@ -73,7 +75,8 @@ const m = computed(() => state.value?.mission ?? null);
 const myRow = computed(() => state.value?.players.find((p) => p.id === me.value?.playerId) ?? null);
 const status = computed(() => myRow.value?.status ?? 'AT_BASE');
 const exp = computed(() => state.value?.expedition ?? null);
-const activePenalties = computed(() => state.value?.penalties.filter((p) => !p.clearedAt) ?? []);
+const myHp = computed(() => myRow.value?.hp ?? 100);
+const myHealth = computed(() => state.value?.health.slice(0, 3) ?? []);
 const radio = computed(() => !!m.value?.commsRadio);
 const radioUp = computed(() => radio.value && !m.value?.commsDisabled);
 const notices = computed(() => {
@@ -92,7 +95,15 @@ const scanLock = computed(() => {
   return null;
 });
 const fieldCrew = computed(() => state.value?.players.filter((p) => p.role === 'crew' && p.status !== 'AT_BASE') ?? []);
-const orders = computed(() => state.value?.monsterActions ?? []);
+const targets = computed(() => fieldCrew.value.filter((p) => ['OUTSIDE', 'RETURNING', 'OVERDUE'].includes(p.status)));
+const rage = computed(() => (m.value?.monsterDamage ?? 0) >= 100);
+async function hit(playerId: number) {
+  const r = await act<{ hp: number; duplicate: boolean }>(`hit${playerId}`, 'POST', '/monster/hit', { targetPlayerId: playerId, requestId: requestId() });
+  if (r) {
+    vibrate(200);
+    toast(`Удар засчитан. Здоровье цели: ${r.hp}%`, 'warn');
+  }
+}
 
 async function joinWith(c: string) {
   joining.value = true;
@@ -141,10 +152,12 @@ async function runPendingClaim() {
 
 const msg = ref('');
 const QUICK = ['НАШЁЛ ЛУТ', 'ВОЗВРАЩАЮСЬ', 'ВИЖУ УГРОЗУ', 'НУЖНА ПОМОЩЬ', 'ЗАБЛУДИЛСЯ'];
+const MONSTER_QUICK = ['ВЫШЕЛ НА ОХОТУ', 'ИДУ К ГРУППЕ', 'УДАРИЛ', 'НУЖНА ПАУЗА', 'ВОЗВРАЩАЮСЬ'];
 async function sendMsg(text = msg.value) {
   const body = text.trim();
   if (!body) return;
-  const r = await act('msg', 'POST', '/messages', { toType: 'operator', body });
+  // Monsters talk only to the field admin; crew talk to the operator over the radio.
+  const r = await act('msg', 'POST', '/messages', { toType: me.value?.role === 'monster' ? 'admin' : 'operator', body });
   if (r && text === msg.value) msg.value = '';
 }
 
@@ -209,32 +222,44 @@ onMounted(async () => {
 
     <!-- MONSTER -->
     <template v-if="me?.role === 'monster'">
-      <section class="card order">
-        <div class="label">ТЕКУЩИЙ ПРИКАЗ</div>
-        <div v-if="orders[0]" class="otext">
-          <span class="oact mono">{{ orders[0].action.toUpperCase() }}<template v-if="orders[0].target"> → {{ orders[0].target }}</template></span>
-          {{ orders[0].text || 'Ожидайте дальнейших инструкций.' }}
-          <span class="mute mono small">{{ clock(orders[0].createdAt) }}</span>
+      <section class="card dmg" :class="{ rage }">
+        <div class="row">
+          <span class="label grow">ВАШ УРОН</span>
+          <b class="mono dmgv">{{ m?.monsterDamage ?? 0 }}% HP ЗА УДАР</b>
         </div>
-        <div v-else class="empty">// ОЖИДАНИЕ ПРИКАЗОВ ВЕДУЩЕГО</div>
+        <p v-if="rage" class="raget mono blink">ЯРОСТЬ: ОДИН УДАР СМЕРТЕЛЕН</p>
+        <p class="mute small">Вы действуете сами. Коснулись сотрудника — сразу отметьте удар. Отмечайте только реальное касание.</p>
       </section>
+
       <section class="card">
-        <div class="label">ЭКИПАЖ В ПОЛЕ</div>
-        <div v-if="!fieldCrew.length" class="empty">// ЗА ШЛЮЗОМ НИКОГО</div>
-        <div v-for="p in fieldCrew" :key="p.id" class="fc">
-          <b class="mono">{{ p.callsign }}</b>
-          <TChip :label="CREW_LABEL[p.status]" :tone="CREW_TONE[p.status]" />
-          <Countdown v-if="p.deadlineAt" size="sm" :deadline="p.deadlineAt" :now="now" :paused-at="m?.pausedAt" />
+        <div class="label">ОТМЕТИТЬ УДАР · ЭКИПАЖ ЗА ШЛЮЗОМ</div>
+        <div v-if="!targets.length" class="empty">// ЗА ШЛЮЗОМ НИКОГО</div>
+        <div v-for="p in targets" :key="p.id" class="target">
+          <div class="tinfo">
+            <b class="mono">{{ p.callsign }}</b>
+            <HpBar :hp="p.hp" size="sm" />
+          </div>
+          <TButton
+            variant="danger" size="lg" :disabled="p.hp <= 0 || m?.status !== 'active'" :confirm="`УДАР: ${p.callsign}?`"
+            :busy="busy.has(`hit${p.id}`)" @click="hit(p.id)"
+          >УДАР</TButton>
         </div>
       </section>
-      <section class="card">
-        <div class="label">ИСТОРИЯ ПРИКАЗОВ</div>
-        <div v-for="o in orders.slice(1, 10)" :key="o.id" class="ol mono">
-          <span class="mute">{{ clock(o.createdAt, false) }}</span> {{ o.action.toUpperCase() }}{{ o.target ? ` → ${o.target}` : '' }} {{ o.text }}
+
+      <section class="card comms">
+        <div class="label">ЧАТ С ВЕДУЩИМ</div>
+        <div class="mlist"><MessageList :messages="state?.messages ?? []" role="player" :now="now" /></div>
+        <div class="quick">
+          <button v-for="q in MONSTER_QUICK" :key="q" type="button" class="qb mono" :disabled="busy.has('msg')" @click="sendMsg(q)">{{ q }}</button>
         </div>
+        <form class="row" @submit.prevent="sendMsg()">
+          <input v-model="msg" class="input grow" maxlength="300" placeholder="СООБЩЕНИЕ ВЕДУЩЕМУ" />
+          <TButton :disabled="!msg.trim()" :busy="busy.has('msg')" @click="sendMsg()">TX</TButton>
+        </form>
       </section>
+
       <section class="safety">
-        ПРАВИЛА УГРОЗЫ: двигайтесь шагом · никакого физического контакта · не выходите за границы территории · при реальной опасности — стоп игра.
+        ПРАВИЛА УГРОЗЫ: двигайтесь шагом · удар — лёгкое касание, без силы · не выходите за границы территории · при реальной опасности — стоп игра.
       </section>
     </template>
 
@@ -261,6 +286,17 @@ onMounted(async () => {
         </div>
         <div v-if="exp && exp.status !== 'completed' && exp.players.length > 1" class="mates mono">
           ГРУППА: {{ exp.players.map((p) => p.callsign).join(' · ') }}
+        </div>
+      </section>
+
+      <section class="card hpc" :class="{ down: myHp <= 0 }">
+        <span class="label">ЗДОРОВЬЕ</span>
+        <HpBar :hp="myHp" size="lg" />
+        <p v-if="myHp <= 0" class="downt mono">ВЫ ВЫВЕДЕНЫ ИЗ СТРОЯ. ВОЗВРАЩАЙТЕСЬ НА БАЗУ ШАГОМ И СООБЩИТЕ ВЕДУЩЕМУ. НУЖНА АПТЕЧКА.</p>
+        <p v-else class="mute small">Здоровье не восстанавливается само — лечит только MEDKIT.</p>
+        <p class="mute small mono">ОПОЗДАНИЕ −{{ m?.overdueDamage ?? 0 }}% · УДАР МОНСТРА −{{ m?.monsterDamage ?? 0 }}%</p>
+        <div v-for="h in myHealth" :key="h.id" class="hlog mono" :class="h.delta < 0 ? 'neg' : 'pos'">
+          <span class="mute">{{ clock(h.createdAt, false) }}</span> {{ h.delta > 0 ? '+' : '' }}{{ h.delta }}% · {{ h.reason }}
         </div>
       </section>
 
@@ -306,9 +342,7 @@ onMounted(async () => {
         <div v-else class="rh">{{ scan.error }}</div>
       </section>
 
-      <section v-for="p in activePenalties" :key="p.id" class="card pen">
-        <span class="mono">▲ ШТРАФ</span> {{ p.reason }}<template v-if="p.amount"> (−{{ p.amount }} CR)</template>
-      </section>
+
 
       <section class="card comms">
         <div class="row">
@@ -464,6 +498,71 @@ onMounted(async () => {
 .out.off {
   color: var(--red);
   border-color: var(--red);
+}
+.hpc.down {
+  border-color: var(--red);
+  background: linear-gradient(180deg, var(--red-dim), var(--panel));
+  animation: pulse-red 1.4s ease-in-out infinite;
+}
+.hpc p {
+  margin: 0;
+}
+.downt {
+  color: #ff7a6e;
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+}
+.hlog {
+  font-size: 11.5px;
+  padding: 2px 0;
+}
+.hlog.neg {
+  color: #ff7a6e;
+}
+.hlog.pos {
+  color: var(--acc);
+}
+.dmg {
+  border-color: rgba(216, 70, 60, 0.5);
+}
+.dmg.rage {
+  border-color: var(--red);
+  background: linear-gradient(180deg, rgba(216, 70, 60, 0.25), var(--panel));
+  animation: pulse-red 1s ease-in-out infinite;
+}
+.dmg p {
+  margin: 0;
+}
+.dmgv {
+  font-size: 16px;
+  color: var(--red);
+}
+.raget {
+  font-size: 15px;
+  font-weight: 800;
+  color: #ff7a6e;
+  letter-spacing: 0.12em;
+}
+.target {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tinfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tinfo b {
+  font-size: 16px;
+  letter-spacing: 0.08em;
+}
+.target :deep(.btn) {
+  min-width: 110px;
 }
 .scanlock {
   margin-top: -4px;
@@ -625,14 +724,6 @@ onMounted(async () => {
   font-size: 14px;
   color: var(--text-dim);
 }
-.pen {
-  border-color: var(--red);
-  background: var(--red-dim);
-  color: #ffb3ab;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 .mlist {
   height: 240px;
   border: 1px solid var(--line);
@@ -690,22 +781,6 @@ onMounted(async () => {
 .nt.crit {
   color: #ff7a6e;
 }
-.order {
-  border-color: var(--red);
-  background: linear-gradient(180deg, var(--red-dim), var(--panel));
-}
-.otext {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 22px;
-  font-weight: 600;
-}
-.oact {
-  font-size: 13px;
-  color: var(--red);
-  letter-spacing: 0.12em;
-}
 .fc {
   display: flex;
   align-items: center;
@@ -714,11 +789,6 @@ onMounted(async () => {
 }
 .fc b {
   flex: 1;
-}
-.ol {
-  font-size: 12px;
-  color: var(--text-dim);
-  padding: 3px 0;
 }
 .safety {
   font-family: var(--mono);

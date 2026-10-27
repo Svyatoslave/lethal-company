@@ -103,7 +103,10 @@ api.post('/purchases/:id/scanner', as(ADMIN, (req, a) => g.answerScanner(req.par
 api.post('/purchases/:id/extraction', as(ADMIN, (req, a) => g.emergencyExtraction(req.params.id, a)));
 api.post('/economy/adjust', as(ADMIN, (req, a) => g.manualAdjust(req.body?.amount, req.body?.reason, a)));
 api.post('/economy/:txId/reverse', as(ADMIN, (req, a) => g.reverseTransaction(req.params.txId, req.body?.reason, a)));
-api.post('/penalties/:id/cancel', as(ADMIN, (req, a) => g.cancelPenalty(req.params.id, a)));
+
+// health
+api.post('/players/:id/hp', as(ADMIN, (req, a) => g.setHp(req.params.id, req.body?.hp, a)));
+api.post('/monster/hit', as(['player'], (req, a) => g.monsterHit(req.body ?? {}, a)));
 
 // comms
 api.post('/messages', as(ANY, (req, a) => g.sendMessage(req.body ?? {}, a)));

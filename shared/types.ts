@@ -22,7 +22,10 @@ export interface MissionView {
   quota: number;
   startBalance: number;
   durationSec: number;
-  overduePenalty: number;
+  /** HP percent lost when a player misses the return deadline. */
+  overdueDamage: number;
+  /** HP percent lost per monster hit (100 = "rage": one hit is lethal). */
+  monsterDamage: number;
   crewSize: number;
   gate: GateStatus;
   threatLevel: number;
@@ -68,7 +71,8 @@ export interface PlayerView {
   role: PlayerRole;
   joinCode?: string;
   status: CrewStatus;
-  penalties: number;
+  /** Health 0..100. Lost on lateness and monster hits; restored only by MEDKIT or the admin. */
+  hp: number;
   online: boolean;
   /** The player's phone is publishing a body cam stream right now. */
   camOn: boolean;
@@ -76,15 +80,18 @@ export interface PlayerView {
   deadlineAt: number | null;
 }
 
-export interface PenaltyView {
+export type HealthKind = 'overdue' | 'hit' | 'medkit' | 'admin';
+
+export interface HealthEventView {
   id: number;
   playerId: number;
   callsign: string;
+  delta: number;
+  hpAfter: number;
+  kind: HealthKind;
   reason: string;
-  amount: number;
+  actor: string;
   createdAt: number;
-  clearedAt: number | null;
-  clearedNote: string | null;
 }
 
 export interface LootView {
@@ -181,7 +188,7 @@ export interface Snapshot {
   lootStats: { total: number; found: number; extracted: number };
   expedition: ExpeditionView | null;
   players: PlayerView[];
-  penalties: PenaltyView[];
+  health: HealthEventView[];
   loot: LootView[];
   transactions: TxView[];
   shop: ShopItemView[];

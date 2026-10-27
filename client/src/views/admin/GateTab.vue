@@ -13,11 +13,11 @@ const m = computed(() => state.value?.mission ?? null);
 const exp = computed(() => state.value?.expedition ?? null);
 const live = computed(() => m.value?.status === 'active' || m.value?.status === 'paused');
 
-const cfg = reactive({ durationMin: 15, penalty: 50 });
+const cfg = reactive({ durationMin: 15, damage: 50 });
 watch(m, (v) => {
   if (!v) return;
   cfg.durationMin = Math.round((v.durationSec / 60) * 10) / 10;
-  cfg.penalty = v.overduePenalty;
+  cfg.damage = v.overdueDamage;
 }, { immediate: true });
 </script>
 
@@ -58,11 +58,11 @@ watch(m, (v) => {
   <TPanel title="ПРАВИЛА ВОЗВРАТА" code="G-03">
     <div class="a-grid2">
       <label class="field"><span class="label">Вылазка, мин</span><input v-model.number="cfg.durationMin" class="input" type="number" min="0.5" step="0.5" /></label>
-      <label class="field"><span class="label">Штраф, CR</span><input v-model.number="cfg.penalty" class="input" type="number" min="0" /></label>
+      <label class="field"><span class="label">Урон за опоздание, % HP</span><input v-model.number="cfg.damage" class="input" type="number" min="0" max="100" /></label>
     </div>
-    <TButton class="top" block :busy="busy.has('cfg')" @click="act('cfg', 'PATCH', '/missions/current', { durationSec: Math.round(cfg.durationMin * 60), overduePenalty: cfg.penalty }, 'Сохранено')">СОХРАНИТЬ</TButton>
+    <TButton class="top" block :busy="busy.has('cfg')" @click="act('cfg', 'PATCH', '/missions/current', { durationSec: Math.round(cfg.durationMin * 60), overdueDamage: cfg.damage }, 'Сохранено')">СОХРАНИТЬ</TButton>
     <p class="a-note top">
-      Опоздавший получает статус OVERDUE и штраф один раз за вылазку. Он не исключается из следующих вылазок.
+      Опоздавший получает статус OVERDUE и теряет здоровье один раз за вылазку. Он не исключается из следующих вылазок.
       <template v-if="m?.timeBonusSec"> Бонус к следующей вылазке: +{{ Math.round(m.timeBonusSec / 60) }} мин.</template>
     </p>
   </TPanel>

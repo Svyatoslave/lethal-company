@@ -198,6 +198,36 @@ const missionCols = db.prepare('PRAGMA table_info(missions)').all() as { name: s
 if (!missionCols.some((c) => c.name === 'cams_unlocked')) {
   db.exec('ALTER TABLE missions ADD COLUMN cams_unlocked INTEGER NOT NULL DEFAULT 0');
 }
+// Health replaced credit penalties: lateness and monster hits take a percentage of HP.
+if (!missionCols.some((c) => c.name === 'overdue_damage')) {
+  db.exec('ALTER TABLE missions ADD COLUMN overdue_damage INTEGER NOT NULL DEFAULT 50');
+  db.exec('ALTER TABLE missions ADD COLUMN monster_damage INTEGER NOT NULL DEFAULT 50');
+  // MEDKIT used to clear a penalty (effect 1); now it heals HP by effect_value percent.
+  db.exec(`UPDATE shop_items SET effect_value = 50,
+    description = 'Восстанавливает здоровье выбранного сотрудника (+% HP в параметре эффекта).'
+    WHERE key = 'medkit' AND effect_value = 1`);
+}
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS health (
+  mission_id INTEGER NOT NULL REFERENCES missions(id),
+  player_id INTEGER NOT NULL REFERENCES players(id),
+  hp INTEGER NOT NULL DEFAULT 100,
+  PRIMARY KEY (mission_id, player_id)
+);
+CREATE TABLE IF NOT EXISTS health_events (
+  id INTEGER PRIMARY KEY,
+  mission_id INTEGER NOT NULL REFERENCES missions(id),
+  player_id INTEGER NOT NULL REFERENCES players(id),
+  delta INTEGER NOT NULL,
+  hp_after INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  idem_key TEXT UNIQUE,
+  created_at INTEGER NOT NULL
+);
+`);
 
 const cache = new Map<string, StatementSync>();
 function prep(sql: string): StatementSync {

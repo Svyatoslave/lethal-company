@@ -7,6 +7,7 @@ import TPanel from '../../components/ui/TPanel.vue';
 import TButton from '../../components/ui/TButton.vue';
 import TChip from '../../components/ui/TChip.vue';
 import Countdown from '../../components/ui/Countdown.vue';
+import HpBar from '../../components/ui/HpBar.vue';
 
 const props = defineProps<{ game: Game }>();
 const { state, now, act, busy } = props.game;
@@ -93,7 +94,7 @@ const rename = ref('');
       <p class="a-note">Выберите до {{ m?.crewSize ?? 4 }} сотрудников для следующей вылазки.</p>
       <div class="a-chips top">
         <button v-for="p in crew" :key="p.id" type="button" class="a-chip" :class="{ on: picked.has(p.id) }" @click="toggle(p.id)">
-          {{ p.callsign }}<template v-if="p.penalties"> ▲</template>
+          {{ p.callsign }}<template v-if="p.hp < 100"> · {{ p.hp }}%</template>
         </button>
       </div>
       <TButton class="top" variant="solid" size="lg" block :disabled="!picked.size || (m?.status !== 'active' && m?.status !== 'paused')" :busy="busy.has('form')" @click="form">
@@ -109,11 +110,15 @@ const rename = ref('');
         <span class="dot" :class="{ on: p.online }" />
         <span class="a-title grow">{{ p.callsign }}</span>
         <span v-if="p.role === 'monster'" class="mono red small">MONSTER</span>
-        <span v-if="p.penalties" class="mono red small">▲×{{ p.penalties }}</span>
         <TChip v-if="p.role === 'crew'" :label="CREW_LABEL[p.status]" :tone="CREW_TONE[p.status]" />
         <span class="mono code">{{ p.joinCode }}</span>
       </div>
+      <HpBar v-if="p.role === 'crew'" :hp="p.hp" size="sm" />
       <div v-if="open === p.id" class="stack">
+        <div v-if="p.role === 'crew'" class="row hpset">
+          <span class="label grow">HP</span>
+          <TButton v-for="v in [0, 50, 100]" :key="v" size="sm" :variant="p.hp === v ? 'solid' : 'ghost'" :busy="busy.has(`hp${p.id}`)" @click="act(`hp${p.id}`, 'POST', `/players/${p.id}/hp`, { hp: v }, `${p.callsign}: HP ${v}%`)">{{ v }}%</TButton>
+        </div>
         <div class="row">
           <input v-model="rename" class="input grow" maxlength="24" />
           <TButton :busy="busy.has(`rn${p.id}`)" @click="act(`rn${p.id}`, 'PATCH', `/players/${p.id}`, { callsign: rename })">ИМЯ</TButton>

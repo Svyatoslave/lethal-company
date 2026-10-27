@@ -10,6 +10,7 @@ const props = defineProps<{ game: Game }>();
 const { state, now, act, busy } = props.game;
 const m = computed(() => state.value?.mission ?? null);
 const crew = computed(() => state.value?.players.filter((p) => p.role === 'crew') ?? []);
+const monsters = computed(() => state.value?.players.filter((p) => p.role === 'monster') ?? []);
 const to = ref('operator');
 const body = ref('');
 const delay = ref(0);
@@ -59,6 +60,7 @@ async function send() {
         <option value="operator">→ ОПЕРАТОР (relay)</option>
         <option value="crew">→ ВЕСЬ ЭКИПАЖ (system)</option>
         <option v-for="p in crew" :key="p.id" :value="String(p.id)">→ {{ p.callsign }} (system)</option>
+        <option v-for="p in monsters" :key="p.id" :value="String(p.id)">→ {{ p.callsign }} (монстр, лично)</option>
       </select>
       <textarea v-model="body" class="textarea" maxlength="500" placeholder="ТЕКСТ" />
       <div class="a-chips">

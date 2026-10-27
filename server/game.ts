@@ -9,6 +9,7 @@ export interface MissionRow {
   id: number; code: string; name: string; status: string; quota: number; start_balance: number;
   duration_sec: number; overdue_penalty: number; crew_size: number; gate: string; threat_level: number;
   comms_radio: number; comms_disabled: number; message_delay_sec: number; time_bonus_sec: number; cams_unlocked: number;
+  overdue_damage: number; monster_damage: number;
   pause_reason: string | null; started_at: number | null; paused_at: number | null; paused_total_ms: number;
   ended_at: number | null; created_at: number;
 }
@@ -39,7 +40,7 @@ export interface PurchaseRow {
   fulfilled_at: number | null; fulfillment: string | null;
 }
 
-export interface Actor { role: Role; playerId: number | null; label: string }
+export interface Actor { role: Role; playerId: number | null; label: string; playerRole?: 'crew' | 'monster' }
 
 // ---------------------------------------------------------------- infra
 
@@ -192,8 +193,8 @@ const DEFAULT_SHOP = [
     description: 'Разблокирует прямую связь оператора с экипажем через устройства.' },
   { key: 'bodycam', name: 'BODY CAM', price: 300, effect: 0, max: 1,
     description: 'Камеры сотрудников: оператор смотрит прямой эфир с телефонов экипажа.' },
-  { key: 'medkit', name: 'MEDKIT', price: 100, effect: 1, max: 0,
-    description: 'Снимает один игровой штраф с выбранного сотрудника.' },
+  { key: 'medkit', name: 'MEDKIT', price: 100, effect: 50, max: 0,
+    description: 'Восстанавливает здоровье выбранного сотрудника (+% HP в параметре эффекта).' },
   { key: 'time_ext', name: 'TIME EXTENSION', price: 200, effect: 300, max: 0,
     description: 'Увеличивает время следующей вылазки (секунды в параметре эффекта).' },
   { key: 'scanner', name: 'THREAT SCANNER', price: 250, effect: 0, max: 0,
@@ -222,7 +223,7 @@ for (const { id } of q.all<{ id: number }>("SELECT id FROM missions WHERE status
 
 export interface MissionOpts {
   name?: unknown; quota?: unknown; startBalance?: unknown; durationSec?: unknown;
-  overduePenalty?: unknown; crewSize?: unknown; copyLoot?: unknown;
+  overdueDamage?: unknown; monsterDamage?: unknown; crewSize?: unknown; copyLoot?: unknown;
 }
 
 export function createMission(o: MissionOpts, actor: Actor) {
@@ -236,13 +237,15 @@ export function createMission(o: MissionOpts, actor: Actor) {
     const quota = o.quota === undefined ? 1000 : int(o.quota, 'Квота', 0, 1e7);
     const startBalance = o.startBalance === undefined ? 0 : int(o.startBalance, 'Стартовый баланс', 0, 1e7);
     const duration = o.durationSec === undefined ? 900 : int(o.durationSec, 'Длительность', 30, 6 * 3600);
-    const penalty = o.overduePenalty === undefined ? 50 : int(o.overduePenalty, 'Штраф', 0, 1e6);
+    const overdueDamage = o.overdueDamage === undefined ? 50 : int(o.overdueDamage, 'Урон за опоздание', 0, 100);
+    const monsterDamage = o.monsterDamage === undefined ? 50 : int(o.monsterDamage, 'Урон монстра', 0, 100);
     const crewSize = o.crewSize === undefined ? 4 : int(o.crewSize, 'Размер группы', 1, 12);
     const code = `LN-${crypto.randomInt(1000, 10000)}`;
+    // overdue_penalty (credits) is legacy: lateness now costs HP, so it is stored as 0.
     const id = q.run(
-      `INSERT INTO missions (code, name, quota, start_balance, duration_sec, overdue_penalty, crew_size, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      code, name, quota, startBalance, duration, penalty, crewSize, now(),
+      `INSERT INTO missions (code, name, quota, start_balance, duration_sec, overdue_penalty, overdue_damage, monster_damage, crew_size, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      code, name, quota, startBalance, duration, overdueDamage, monsterDamage, crewSize, now(),
     ).id;
     seedShop(id);
     if (startBalance > 0) addTx(id, startBalance, 'start', 'Стартовый бюджет корпорации', actor.label, `start:${id}`);
@@ -328,7 +331,8 @@ export function updateMission(patch: Record<string, unknown>, actor: Actor) {
     if (patch.name !== undefined) sets.push(['name', text(patch.name, 'Название', 60)]);
     if (patch.quota !== undefined) sets.push(['quota', int(patch.quota, 'Квота', 0, 1e7)]);
     if (patch.durationSec !== undefined) sets.push(['duration_sec', int(patch.durationSec, 'Длительность', 30, 6 * 3600)]);
-    if (patch.overduePenalty !== undefined) sets.push(['overdue_penalty', int(patch.overduePenalty, 'Штраф', 0, 1e6)]);
+    if (patch.overdueDamage !== undefined) sets.push(['overdue_damage', int(patch.overdueDamage, 'Урон за опоздание', 0, 100)]);
+    if (patch.monsterDamage !== undefined) sets.push(['monster_damage', int(patch.monsterDamage, 'Урон монстра', 0, 100)]);
     if (patch.crewSize !== undefined) sets.push(['crew_size', int(patch.crewSize, 'Размер группы', 1, 12)]);
     if (patch.messageDelaySec !== undefined) sets.push(['message_delay_sec', int(patch.messageDelaySec, 'Задержка', 0, 600)]);
     if (patch.timeBonusSec !== undefined) sets.push(['time_bonus_sec', int(patch.timeBonusSec, 'Бонус времени', 0, 6 * 3600)]);
@@ -344,6 +348,18 @@ export function updateMission(patch: Record<string, unknown>, actor: Actor) {
       fx('system:alert', { type: 'comms', level: patch.commsDisabled ? 'warn' : 'ok', title: patch.commsDisabled ? 'SIGNAL LOST' : 'SIGNAL RESTORED' });
     }
     if (patch.camsUnlocked && !m.cams_unlocked) camsOnlineFx(m, actor);
+    if (patch.monsterDamage !== undefined && Number(patch.monsterDamage) !== m.monster_damage) {
+      const d = Number(patch.monsterDamage);
+      const rage = d >= 100;
+      // Everyone must know when monsters become lethal: a loud alert on every device, crew included.
+      logEvent(m.id, 'THREAT', rage ? 'crit' : 'warn',
+        rage ? 'ENTITIES ENRAGED. A single contact is now lethal (−100% HP).' : `Entity aggression changed: a contact costs ${d}% HP.`, 'all', actor.label);
+      fx('system:alert', {
+        type: 'rage', level: rage ? 'crit' : 'warn',
+        title: rage ? 'МОНСТРЫ В ЯРОСТИ' : `УРОН МОНСТРОВ: ${d}%`,
+        text: rage ? 'Один удар — 100% здоровья. Будьте предельно осторожны.' : `Один удар отнимает ${d}% здоровья.`,
+      });
+    }
     if (patch.commsRadio && !m.comms_radio) {
       logEvent(m.id, 'COMMS', 'ok', 'Signal established. Direct radio link online.', 'all', actor.label);
       fx('comms:unlocked', { type: 'comms', level: 'ok', title: 'SIGNAL ESTABLISHED', text: 'Прямая связь доступна' });
@@ -625,33 +641,88 @@ export function forceCompleteExpedition(actor: Actor) {
   });
 }
 
-// ---------------------------------------------------------------- penalties
+// ---------------------------------------------------------------- health
 
-function applyPenalty(m: MissionRow, playerId: number, reason: string, amount: number, idemKey: string, actor: string) {
-  const r = q.run(
-    'INSERT OR IGNORE INTO penalties (mission_id, player_id, reason, amount, idem_key, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    m.id, playerId, reason, amount, idemKey, now(),
-  );
-  if (!r.changes) return false;
-  if (amount > 0) {
-    const txId = addTx(m.id, -amount, 'penalty', reason, actor, `penalty:${idemKey}`, `penalty:${r.id}`);
-    q.run('UPDATE penalties SET transaction_id = ? WHERE id = ?', txId, r.id);
-  }
-  return true;
+export function hpOf(missionId: number, playerId: number): number {
+  return q.get<{ hp: number }>('SELECT hp FROM health WHERE mission_id = ? AND player_id = ?', missionId, playerId)?.hp ?? 100;
 }
 
-export function cancelPenalty(penaltyId: unknown, actor: Actor) {
+/**
+ * Changes a player's HP (clamped to 0..100) and records it. HP never regenerates by itself: only
+ * MEDKIT and admin corrections raise it. Returns null when the idempotency key was already used.
+ */
+function changeHp(
+  m: MissionRow, playerId: number, delta: number, kind: 'overdue' | 'hit' | 'medkit' | 'admin', reason: string, actor: string,
+  idemKey: string | null = null,
+): { before: number; after: number } | null {
+  const before = hpOf(m.id, playerId);
+  const after = Math.max(0, Math.min(100, before + delta));
+  const r = q.run(
+    `INSERT OR IGNORE INTO health_events (mission_id, player_id, delta, hp_after, kind, reason, actor, idem_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    m.id, playerId, after - before, after, kind, reason, actor, idemKey, now(),
+  );
+  if (!r.changes) return null;
+  q.run(
+    'INSERT INTO health (mission_id, player_id, hp) VALUES (?, ?, ?) ON CONFLICT(mission_id, player_id) DO UPDATE SET hp = excluded.hp',
+    m.id, playerId, after,
+  );
+  if (after === 0 && before > 0) {
+    const p = getPlayer(playerId)!;
+    logEvent(m.id, 'WARNING', 'crit', `${p.callsign} is DOWN. Vital signs critical.`, 'all');
+    fx('system:alert', { type: 'down', level: 'crit', title: `${p.callsign}: HP 0%`, text: 'Сотрудник выведен из строя. Нужна аптечка.', targetPlayerId: playerId });
+  }
+  return { before, after };
+}
+
+const inField = (m: MissionRow, playerId: number) =>
+  !!q.get(
+    `SELECT 1 FROM expedition_players ep JOIN expeditions e ON e.id = ep.expedition_id
+     WHERE e.mission_id = ? AND e.status = 'active' AND ep.player_id = ? AND ep.status IN ('outside','returning','overdue')`,
+    m.id, playerId,
+  );
+
+const lastHit = new Map<string, number>();
+const HIT_COOLDOWN_MS = 10_000;
+
+/** A monster reports that it touched/tagged a crew member. Damage is the mission's monster_damage percent. */
+export function monsterHit(o: { targetPlayerId?: unknown; requestId?: unknown }, actor: Actor) {
   return mutate(() => {
+    if (actor.role !== 'player' || actor.playerRole !== 'monster') fail(403, 'Отмечать удары может только монстр');
     const m = mustMission();
-    const pen = q.get<{ id: number; transaction_id: number | null; cleared_at: number | null; player_id: number; reason: string }>(
-      'SELECT * FROM penalties WHERE id = ? AND mission_id = ?', int(penaltyId, 'penaltyId', 1, 1e9), m.id,
-    ) ?? fail(404, 'Штраф не найден');
-    if (pen.cleared_at) fail(409, 'Штраф уже снят');
-    q.run("UPDATE penalties SET cleared_at = ?, cleared_note = 'Отменён ведущим' WHERE id = ?", now(), pen.id);
-    if (pen.transaction_id) reverseTxInner(m, pen.transaction_id, 'Отмена штрафа', actor);
-    logEvent(m.id, 'ADMIN', 'warn', `Penalty #${pen.id} cancelled (${getPlayer(pen.player_id)?.callsign})`, 'staff', actor.label);
+    requireRunning(m);
+    if (typeof o.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(o.requestId)) fail(400, 'Нет идентификатора запроса');
+    const target = mustPlayer(o.targetPlayerId);
+    if (target.role !== 'crew') fail(409, 'Цель не является сотрудником экипажа');
+    if (!inField(m, target.id)) fail(409, `${target.callsign} не за шлюзом`);
+    // Different request ids for the same target within seconds are almost always a double tap.
+    const pair = `${actor.playerId}:${target.id}`;
+    const dup = q.get('SELECT 1 FROM health_events WHERE idem_key = ?', `hit:${o.requestId}`);
+    if (!dup && (lastHit.get(pair) ?? 0) > now() - HIT_COOLDOWN_MS) fail(429, 'Удар по этой цели уже отмечен. Подождите 10 секунд.');
+    // The reason is shown to the victim; who hit is kept in `actor` (admin-only views).
+    const r = changeHp(m, target.id, -m.monster_damage, 'hit', 'Атака монстра', actor.label, `hit:${o.requestId}`);
+    if (!r) return { duplicate: true, hp: hpOf(m.id, target.id) };
+    lastHit.set(pair, now());
+    logEvent(m.id, 'THREAT', 'crit', `Hostile contact: ${target.callsign} injured (HP ${r.after}%)`, 'all', actor.label);
+    logEvent(m.id, 'THREAT', 'info', `↳ hit by ${actor.label}, −${m.monster_damage}%`, 'admin', actor.label);
+    fx('monster:event', { type: 'hit', level: 'crit', title: 'ВЫ РАНЕНЫ', text: `Здоровье: ${r.after}%`, targetPlayerId: target.id }, { playerId: target.id });
+    fx('monster:event', { type: 'hit', level: 'warn', title: `${target.callsign} РАНЕН`, text: `HP ${r.after}%` }, 'operator');
+    fx('monster:event', { type: 'hit', level: 'warn', title: `${target.callsign} РАНЕН`, text: `HP ${r.after}% · ${actor.label}` }, 'admin');
+    return { duplicate: false, hp: r.after };
   });
 }
+
+/** Field admin correction: sets HP to an exact value (recorded as an 'admin' health event). */
+export function setHp(playerId: unknown, hp: unknown, actor: Actor) {
+  return mutate(() => {
+    const m = mustMission();
+    const p = mustPlayer(playerId);
+    const value = int(hp, 'HP', 0, 100);
+    const r = changeHp(m, p.id, value - hpOf(m.id, p.id), 'admin', 'Корректировка ведущим', actor.label);
+    logEvent(m.id, 'ADMIN', 'warn', `HP corrected: ${p.callsign} ${r?.before}% → ${value}%`, 'staff', actor.label);
+  });
+}
+
 
 // ---------------------------------------------------------------- tick
 
@@ -674,9 +745,10 @@ export function tick() {
       mutate(() => {
         const r = q.run("UPDATE expedition_players SET status = 'overdue', overdue_at = ? WHERE id = ? AND status IN ('outside','returning')", t, ep.id);
         if (!r.changes) return;
-        applyPenalty(m, ep.player_id, `Опоздание: ${ep.callsign}, вылазка #${ep.number}`, m.overdue_penalty, `overdue:${ep.id}`, 'SYSTEM');
-        logEvent(m.id, 'WARNING', 'crit', `Crew member overdue: ${ep.callsign}${m.overdue_penalty ? ` (−${m.overdue_penalty} CR)` : ''}`, 'all');
-        fx('player:overdue', { type: 'overdue', level: 'crit', title: `${ep.callsign}: OVERDUE`, text: 'Срок возвращения истёк', targetPlayerId: ep.player_id });
+        const hp = changeHp(m, ep.player_id, -m.overdue_damage, 'overdue', `Опоздание, вылазка #${ep.number}`, 'SYSTEM', `overdue:${ep.id}`);
+        const left = hp?.after ?? hpOf(m.id, ep.player_id);
+        logEvent(m.id, 'WARNING', 'crit', `Crew member overdue: ${ep.callsign} (HP ${left}%)`, 'all');
+        fx('player:overdue', { type: 'overdue', level: 'crit', title: `${ep.callsign}: OVERDUE`, text: `Срок возвращения истёк. Здоровье: ${left}%`, targetPlayerId: ep.player_id });
       });
     }
   }
@@ -946,14 +1018,12 @@ export function purchase(itemId: unknown, o: { requestId?: unknown; targetPlayer
     if (item.max_purchases > 0 && bought >= item.max_purchases) fail(409, 'Лимит покупок исчерпан');
 
     let target: PlayerRow | null = null;
-    let penaltyId: number | null = null;
     if (item.key === 'radio' && m.comms_radio) fail(409, 'Связь уже установлена');
     if (item.key === 'bodycam' && m.cams_unlocked) fail(409, 'Камеры уже подключены');
     if (item.key === 'medkit') {
       target = mustPlayer(o.targetPlayerId);
-      penaltyId = q.get<{ id: number }>(
-        'SELECT id FROM penalties WHERE mission_id = ? AND player_id = ? AND cleared_at IS NULL ORDER BY id LIMIT 1', m.id, target.id,
-      )?.id ?? fail(409, `У ${target.callsign} нет активных штрафов`);
+      if (target.role !== 'crew') fail(409, 'Аптечка только для экипажа');
+      if (hpOf(m.id, target.id) >= 100) fail(409, `${target.callsign} полностью здоров`);
     }
     const balance = balanceOf(m.id);
     if (balance < item.price) fail(402, `НЕДОСТАТОЧНО КРЕДИТОВ: ${balance} / ${item.price} CR`);
@@ -978,12 +1048,13 @@ export function purchase(itemId: unknown, o: { requestId?: unknown; targetPlayer
         done('Камеры подключены');
         camsOnlineFx(m, actor);
         break;
-      case 'medkit':
-        q.run('UPDATE penalties SET cleared_at = ?, cleared_note = ? WHERE id = ?', now(), `MEDKIT #${pid}`, penaltyId);
-        done(`Штраф снят: ${target!.callsign}`);
-        logEvent(m.id, 'STORE', 'ok', `MEDKIT applied to ${target!.callsign}. Penalty cleared.`, 'all', actor.label);
-        fx('system:alert', { type: 'medkit', level: 'ok', title: 'MEDKIT APPLIED', text: target!.callsign, targetPlayerId: target!.id }, { playerId: target!.id }, 'staff');
+      case 'medkit': {
+        const hp = changeHp(m, target!.id, item.effect_value, 'medkit', `MEDKIT #${pid}`, actor.label, `medkit:${pid}`)!;
+        done(`${target!.callsign}: ${hp.before}% → ${hp.after}%`);
+        logEvent(m.id, 'STORE', 'ok', `MEDKIT applied to ${target!.callsign}: HP ${hp.before}% → ${hp.after}%`, 'all', actor.label);
+        fx('system:alert', { type: 'medkit', level: 'ok', title: 'MEDKIT APPLIED', text: `${target!.callsign}: здоровье ${hp.after}%`, targetPlayerId: target!.id }, { playerId: target!.id }, 'staff');
         break;
+      }
       case 'time_ext':
         q.run('UPDATE missions SET time_bonus_sec = time_bonus_sec + ? WHERE id = ?', item.effect_value, m.id);
         done(`+${item.effect_value} с к следующей вылазке`);
@@ -1113,7 +1184,9 @@ function insertMessage(
   ).id;
   if (deliverAt <= now()) {
     const f = messageFx(toType, toPlayerId, from.role === 'player' ? from.label : senderLabel(from.role, channel, null), body);
-    fx(f.name, f.payload, ...f.target);
+    // Monster ⇄ field admin chat is private: the operator must not see or hear it.
+    const monsterChat = from.playerRole === 'monster' || (toPlayerId !== null && getPlayer(toPlayerId)?.role === 'monster');
+    fx(f.name, f.payload, ...(monsterChat ? (toType === 'admin' ? ['admin' as const] : [{ playerId: toPlayerId! }, 'admin' as const]) : f.target));
   }
   return id;
 }
@@ -1131,9 +1204,16 @@ export function sendMessage(o: { toType?: unknown; toPlayerId?: unknown; body?: 
 
     if (actor.role === 'admin') {
       if (toType === 'admin') fail(400, 'Нельзя отправить себе');
-      insertMessage(m, actor, toType, toPlayer?.id ?? null, body, toType === 'operator' ? 'relay' : 'system', t);
+      // To a monster it is a private admin chat ('relay'); to crew it is a Company notice ('system').
+      const channel = toType === 'operator' || toPlayer?.role === 'monster' ? 'relay' : 'system';
+      insertMessage(m, actor, toType, toPlayer?.id ?? null, body, channel, t);
+    } else if (actor.playerRole === 'monster') {
+      // Monsters act on their own; their only line is a private chat with the field admin (never jammed).
+      if (toType !== 'admin') fail(403, 'Монстр может писать только ведущему');
+      insertMessage(m, actor, 'admin', null, body, 'relay', t);
     } else if (actor.role === 'operator') {
       if (toType === 'operator') fail(400, 'Нельзя отправить себе');
+      if (toPlayer?.role === 'monster') fail(403, 'Нет связи с этим объектом');
       if (toType === 'admin') insertMessage(m, actor, 'admin', null, body, 'relay', t);
       else {
         if (!m.comms_radio) fail(403, 'НЕТ СВЯЗИ. Купите RADIO или используйте курьера.');
@@ -1161,23 +1241,21 @@ export function setThreatLevel(level: unknown, actor: Actor) {
   });
 }
 
-const MONSTER_ACTIONS: MonsterActionType[] = ['warning', 'spawn', 'effect', 'false_alarm', 'order'];
+// Atmospheric threat events from the field admin. Monsters themselves act on their own (see monsterHit).
+const THREAT_EVENTS: MonsterActionType[] = ['warning', 'spawn', 'effect', 'false_alarm'];
 
-export function monsterAction(o: { monsterId?: unknown; action?: unknown; targetPlayerId?: unknown; text?: unknown }, actor: Actor) {
+export function monsterAction(o: { action?: unknown; targetPlayerId?: unknown; text?: unknown }, actor: Actor) {
   return mutate(() => {
     const m = mustMission();
     requireRunning(m);
     const action = o.action as MonsterActionType;
-    if (!MONSTER_ACTIONS.includes(action)) fail(400, 'Неизвестное действие');
-    const monster = o.monsterId ? mustPlayer(o.monsterId) : null;
-    if (monster && monster.role !== 'monster') fail(409, `${monster.callsign} не монстр`);
+    if (!THREAT_EVENTS.includes(action)) fail(400, 'Неизвестное действие');
     const target = o.targetPlayerId ? mustPlayer(o.targetPlayerId) : null;
-    if (action === 'order' && !monster) fail(400, 'Выберите монстра для приказа');
     if (action === 'effect' && !target) fail(400, 'Выберите цель эффекта');
     const body = typeof o.text === 'string' && o.text.trim() ? o.text.trim().slice(0, 300) : '';
     q.run(
-      'INSERT INTO monster_actions (mission_id, monster_id, action, target_player_id, text, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      m.id, monster?.id ?? null, action, target?.id ?? null, body, now(),
+      'INSERT INTO monster_actions (mission_id, monster_id, action, target_player_id, text, created_at) VALUES (?, NULL, ?, ?, ?, ?)',
+      m.id, action, target?.id ?? null, body, now(),
     );
     const tgt = target ? ` near ${target.callsign}` : '';
     const crew: FxTarget[] = target ? [{ playerId: target.id }, 'staff'] : ['crew', 'staff'];
@@ -1197,13 +1275,6 @@ export function monsterAction(o: { monsterId?: unknown; action?: unknown; target
         logEvent(m.id, 'THREAT', 'warn', `Entity effect on ${target!.callsign}: ${body || 'unknown'}`, 'all', actor.label);
         fx('monster:event', { type: 'effect', level: 'crit', title: 'ВЫ ПОД ВОЗДЕЙСТВИЕМ', text: body, targetPlayerId: target!.id }, { playerId: target!.id }, 'staff');
         break;
-      case 'order':
-        logEvent(m.id, 'ADMIN', 'info', `Order to ${monster!.callsign}: ${body}`, 'admin', actor.label);
-        break;
-    }
-    if (monster) {
-      const orderText = action === 'order' ? body : `${action.toUpperCase()}${target ? ` → ${target.callsign}` : ''}${body ? `: ${body}` : ''}`;
-      fx('monster:event', { type: 'order', level: 'warn', title: 'ПРИКАЗ', text: orderText, targetPlayerId: monster.id }, { playerId: monster.id });
     }
   });
 }
