@@ -18,7 +18,10 @@ const live = computed(() => !!exp.value && (exp.value.status === 'preparing' || 
 const players = computed(() => state.value?.players ?? []);
 const crew = computed(() => players.value.filter((p) => p.role === 'crew'));
 const overdue = computed(() => crew.value.filter((p) => p.status === 'OVERDUE'));
-const free = computed(() => crew.value.filter((p) => !exp.value?.players.some((x) => x.playerId === p.id && x.status !== 'returned') || !live.value));
+const free = computed(() =>
+  crew.value.filter((p) => p.hp > 0 && (!exp.value?.players.some((x) => x.playerId === p.id && x.status !== 'returned') || !live.value)),
+);
+const hpOf = (playerId: number) => crew.value.find((p) => p.id === playerId)?.hp ?? 100;
 
 const picked = reactive(new Set<number>());
 function toggle(id: number) {
@@ -66,7 +69,7 @@ const rename = ref('');
           <template v-if="ep.penaltyExempt"> · без штрафа (эвакуация)</template>
         </div>
         <div class="a-grid2">
-          <TButton v-if="ep.status === 'ready'" variant="warn" :disabled="exp.status !== 'active'" :busy="busy.has(`x${ep.playerId}`)" @click="act(`x${ep.playerId}`, 'POST', '/expeditions/current/exit', { playerId: ep.playerId })">ВЫПУСТИТЬ</TButton>
+          <TButton v-if="ep.status === 'ready'" variant="warn" :disabled="exp.status !== 'active' || hpOf(ep.playerId) <= 0" :busy="busy.has(`x${ep.playerId}`)" @click="act(`x${ep.playerId}`, 'POST', '/expeditions/current/exit', { playerId: ep.playerId })">ВЫПУСТИТЬ</TButton>
           <TButton v-if="ep.status === 'ready'" variant="ghost" :busy="busy.has(`rm${ep.playerId}`)" @click="act(`rm${ep.playerId}`, 'POST', '/expeditions/current/remove', { playerId: ep.playerId })">УБРАТЬ</TButton>
           <TButton v-if="ep.status === 'outside'" variant="ghost" :busy="busy.has(`rg${ep.playerId}`)" @click="act(`rg${ep.playerId}`, 'POST', '/expeditions/current/returning', { playerId: ep.playerId })">ВОЗВРАЩАЕТСЯ</TButton>
           <TButton v-if="['outside', 'returning', 'overdue'].includes(ep.status)" variant="solid" confirm="НА БАЗЕ?" :busy="busy.has(`ret${ep.playerId}`)" @click="act(`ret${ep.playerId}`, 'POST', '/expeditions/current/return', { playerId: ep.playerId })">ВЕРНУЛСЯ</TButton>
@@ -93,8 +96,8 @@ const rename = ref('');
     <template v-else>
       <p class="a-note">Выберите до {{ m?.crewSize ?? 4 }} сотрудников для следующей вылазки.</p>
       <div class="a-chips top">
-        <button v-for="p in crew" :key="p.id" type="button" class="a-chip" :class="{ on: picked.has(p.id) }" @click="toggle(p.id)">
-          {{ p.callsign }}<template v-if="p.hp < 100"> · {{ p.hp }}%</template>
+        <button v-for="p in crew" :key="p.id" type="button" class="a-chip" :class="{ on: picked.has(p.id) }" :disabled="p.hp <= 0" @click="toggle(p.id)">
+          {{ p.callsign }}<template v-if="p.hp <= 0"> · DOWN</template><template v-else-if="p.hp < 100"> · {{ p.hp }}%</template>
         </button>
       </div>
       <TButton class="top" variant="solid" size="lg" block :disabled="!picked.size || (m?.status !== 'active' && m?.status !== 'paused')" :busy="busy.has('form')" @click="form">

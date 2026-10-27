@@ -193,7 +193,7 @@ const DEFAULT_SHOP = [
     description: 'Разблокирует прямую связь оператора с экипажем через устройства.' },
   { key: 'bodycam', name: 'BODY CAM', price: 300, effect: 0, max: 1,
     description: 'Камеры сотрудников: оператор смотрит прямой эфир с телефонов экипажа.' },
-  { key: 'medkit', name: 'MEDKIT', price: 100, effect: 50, max: 0,
+  { key: 'medkit', name: 'MEDKIT', price: 100, effect: 25, max: 0,
     description: 'Восстанавливает здоровье выбранного сотрудника (+% HP в параметре эффекта).' },
   { key: 'time_ext', name: 'TIME EXTENSION', price: 200, effect: 300, max: 0,
     description: 'Увеличивает время следующей вылазки (секунды в параметре эффекта).' },
@@ -422,6 +422,7 @@ function rosterNames(expeditionId: number) {
 function validateCrewMember(m: MissionRow, playerId: unknown, expeditionId: number | null): PlayerRow {
   const p = mustPlayer(playerId);
   if (p.role !== 'crew') fail(409, `${p.callsign} не является сотрудником экипажа`);
+  requireAlive(m, p);
   const busy = q.get(
     `SELECT 1 FROM expedition_players ep JOIN expeditions e ON e.id = ep.expedition_id
      WHERE ep.player_id = ? AND e.mission_id = ? AND e.status IN ('preparing','active') AND e.id <> ? AND ep.status <> 'returned'`,
@@ -499,6 +500,8 @@ export function openGate(actor: Actor) {
     const t = now();
     let exp = currentExpedition(m.id);
     if (exp?.status === 'preparing') {
+      // Someone may have gone down after the roster was formed: they stay on the ship.
+      if (!dropDownedFromRoster(m, exp, actor)) fail(409, 'В группе нет боеспособных сотрудников (HP 0%). Нужна аптечка.');
       const duration = m.duration_sec + m.time_bonus_sec;
       q.run("UPDATE expeditions SET status = 'active', opened_at = ?, deadline_at = ?, duration_sec = ? WHERE id = ?", t, t + duration * 1000, duration, exp.id);
       if (m.time_bonus_sec) {
@@ -514,10 +517,25 @@ export function openGate(actor: Actor) {
       fx('gate:opened', { type: 'gate', level: 'warn', title: 'AIRLOCK OPEN', text: exp ? `Вылазка #${exp.number}` : undefined });
     }
     if (exp?.status === 'active') {
+      dropDownedFromRoster(m, exp, actor);
       const ready = q.all<EpRow>("SELECT * FROM expedition_players WHERE expedition_id = ? AND status = 'ready'", exp.id);
       for (const ep of ready) sendOut(m, exp, ep, t, actor);
     }
   });
+}
+
+/** Removes not-yet-departed roster members at 0% HP. Returns how many members remain. */
+function dropDownedFromRoster(m: MissionRow, exp: ExpeditionRow, actor: Actor): number {
+  const ready = q.all<EpRow & { callsign: string }>(
+    "SELECT ep.*, p.callsign FROM expedition_players ep JOIN players p ON p.id = ep.player_id WHERE ep.expedition_id = ? AND ep.status = 'ready'",
+    exp.id,
+  );
+  for (const ep of ready) {
+    if (hpOf(m.id, ep.player_id) > 0) continue;
+    q.run('DELETE FROM expedition_players WHERE id = ?', ep.id);
+    logEvent(m.id, 'CREW', 'warn', `${ep.callsign} is DOWN and stays aboard (removed from expedition #${exp.number})`, 'all', actor.label);
+  }
+  return q.get<{ c: number }>('SELECT COUNT(*) AS c FROM expedition_players WHERE expedition_id = ?', exp.id)!.c;
 }
 
 export function gateClosing(actor: Actor) {
@@ -550,6 +568,7 @@ export function markExit(playerId: unknown, actor: Actor) {
     const p = mustPlayer(playerId);
     const ep = epOf(exp.id, p.id) ?? fail(404, 'Сотрудник не в группе');
     if (ep.status !== 'ready') fail(409, 'Сотрудник уже за шлюзом');
+    requireAlive(m, p);
     sendOut(m, exp, ep, now(), actor);
   });
 }
@@ -647,6 +666,11 @@ export function hpOf(missionId: number, playerId: number): number {
   return q.get<{ hp: number }>('SELECT hp FROM health WHERE mission_id = ? AND player_id = ?', missionId, playerId)?.hp ?? 100;
 }
 
+/** A player at 0% HP is DOWN: stays aboard, cannot leave or scan until someone heals them. */
+function requireAlive(m: MissionRow, p: PlayerRow) {
+  if (hpOf(m.id, p.id) <= 0) fail(409, `${p.callsign} выведен из строя (HP 0%). Нужна аптечка.`);
+}
+
 /**
  * Changes a player's HP (clamped to 0..100) and records it. HP never regenerates by itself: only
  * MEDKIT and admin corrections raise it. Returns null when the idempotency key was already used.
@@ -695,6 +719,7 @@ export function monsterHit(o: { targetPlayerId?: unknown; requestId?: unknown },
     const target = mustPlayer(o.targetPlayerId);
     if (target.role !== 'crew') fail(409, 'Цель не является сотрудником экипажа');
     if (!inField(m, target.id)) fail(409, `${target.callsign} не за шлюзом`);
+    if (hpOf(m.id, target.id) <= 0) fail(409, `${target.callsign} уже выведен из строя`);
     // Different request ids for the same target within seconds are almost always a double tap.
     const pair = `${actor.playerId}:${target.id}`;
     const dup = q.get('SELECT 1 FROM health_events WHERE idem_key = ?', `hit:${o.requestId}`);
@@ -801,6 +826,7 @@ export function claimLoot(token: unknown, actor: Actor) {
     requireRunning(m);
     // House rule: scrap is registered between raids, never while a group is in the field.
     if (currentExpedition(m.id)?.status === 'active') fail(423, 'СКАНИРОВАНИЕ ЗАБЛОКИРОВАНО ВО ВРЕМЯ ВЫЛАЗКИ');
+    if (actor.playerId && hpOf(m.id, actor.playerId) <= 0) fail(423, 'ВЫ ВЫВЕДЕНЫ ИЗ СТРОЯ. Сканирование недоступно до лечения.');
     const item = q.get<LootRow>('SELECT * FROM loot WHERE mission_id = ? AND token = ?', m.id, token as string);
     if (!item) {
       const elsewhere = q.get('SELECT 1 FROM loot WHERE token = ?', token as string);
