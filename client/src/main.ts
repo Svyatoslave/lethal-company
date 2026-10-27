@@ -14,6 +14,7 @@ const router = createRouter({
     { path: '/admin', component: () => import('./views/Admin.vue') },
     { path: '/crew', component: () => import('./views/Crew.vue') },
     { path: '/print', component: () => import('./views/Print.vue') },
+    { path: '/observer', component: () => import('./views/Observer.vue') },
     // QR targets: scrap tag and personnel badge. Both resolve inside the crew device.
     { path: '/s/:token', redirect: (to) => ({ path: '/crew', query: { claim: String(to.params.token) } }) },
     { path: '/join/:code', redirect: (to) => ({ path: '/crew', query: { code: String(to.params.code) } }) },

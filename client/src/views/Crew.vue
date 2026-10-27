@@ -10,6 +10,7 @@ import AlertLayer from '../components/AlertLayer.vue';
 import Logo from '../components/Logo.vue';
 import MessageList from '../components/MessageList.vue';
 import Scanner from '../components/Scanner.vue';
+import CameraPanel from '../components/CameraPanel.vue';
 import TButton from '../components/ui/TButton.vue';
 import TChip from '../components/ui/TChip.vue';
 import Countdown from '../components/ui/Countdown.vue';
@@ -289,6 +290,7 @@ onMounted(async () => {
       ПРИ РЕАЛЬНОЙ ОПАСНОСТИ ИГРА ОСТАНАВЛИВАЕТСЯ. НЕ БЕГАЙТЕ В ТЕМНОТЕ. НЕ ПОКИДАЙТЕ ТЕРРИТОРИЮ.
     </footer>
 
+    <CameraPanel v-if="authed && me" app="crew" publish :suspended="scanning" />
     <Scanner v-if="scanning" @detected="claim" @close="scanning = false" />
 
     <div v-if="m?.status === 'paused'" class="curtain">

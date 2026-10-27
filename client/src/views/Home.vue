@@ -42,6 +42,7 @@ const boot = [
         <span class="d">Телефон сотрудника: статус, таймер, сканер лута, рация.</span>
       </RouterLink>
     </nav>
+    <RouterLink to="/observer">НАБЛЮДАТЕЛЬ · КАМЕРЫ МОНСТРОВ</RouterLink>
     <footer class="foot mono">
       <span>ПРИ РЕАЛЬНОЙ ОПАСНОСТИ ИГРА ОСТАНАВЛИВАЕТСЯ. БЕЗОПАСНОСТЬ ВАЖНЕЕ ПРАВИЛ.</span>
       <button type="button" class="crt" @click="toggleCrt">CRT FX: {{ crt ? 'ON' : 'OFF' }}</button>

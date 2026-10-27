@@ -14,6 +14,7 @@ import CrewPanel from './operator/CrewPanel.vue';
 import ScrapPanel from './operator/ScrapPanel.vue';
 import StorePanel from './operator/StorePanel.vue';
 import CommsPanel from './operator/CommsPanel.vue';
+import CameraPanel from '../components/CameraPanel.vue';
 
 const game = useGame('operator', (name) => {
   if (name === 'economy:updated' || name === 'loot:extracted') return 'ignore';
@@ -83,6 +84,7 @@ const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((sta
       </div>
       <div class="col">
         <CrewPanel :game="game" />
+        <CameraPanel app="operator" />
         <ScrapPanel :game="game" class="fill" />
       </div>
       <div class="col">

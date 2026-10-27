@@ -5,7 +5,7 @@ import { DATA_DIR, q } from './db.js';
 import { GameError, randomToken, type Actor, type PlayerRow } from './game.js';
 import type { Role } from '../shared/types.js';
 
-interface Pins { adminPin: string; operatorPin: string }
+interface Pins { adminPin: string; operatorPin: string; observerPin: string }
 
 function loadPins(): Pins {
   const file = path.join(DATA_DIR, 'secrets.json');
@@ -16,12 +16,18 @@ function loadPins(): Pins {
     pins = {
       adminPin: String(crypto.randomInt(100000, 1000000)),
       operatorPin: String(crypto.randomInt(1000, 10000)),
+      observerPin: String(crypto.randomInt(100000, 1000000)),
     };
+    fs.writeFileSync(file, JSON.stringify(pins, null, 2));
+  }
+  if (!pins.observerPin) {
+    pins.observerPin = String(crypto.randomInt(100000, 1000000));
     fs.writeFileSync(file, JSON.stringify(pins, null, 2));
   }
   return {
     adminPin: process.env.ADMIN_PIN || pins.adminPin,
     operatorPin: process.env.OPERATOR_PIN || pins.operatorPin,
+    observerPin: process.env.OBSERVER_PIN || pins.observerPin,
   };
 }
 
@@ -52,8 +58,8 @@ function createSession(role: Role, playerId: number | null) {
 
 export function login(role: unknown, pin: unknown, ip: string) {
   throttle(ip);
-  if (role !== 'admin' && role !== 'operator') throw new GameError(400, 'Неизвестная роль');
-  const expected = role === 'admin' ? pins.adminPin : pins.operatorPin;
+  if (role !== 'admin' && role !== 'operator' && role !== 'observer') throw new GameError(400, 'Неизвестная роль');
+  const expected = role === 'admin' ? pins.adminPin : role === 'observer' ? pins.observerPin : pins.operatorPin;
   if (typeof pin !== 'string' || !same(pin.trim(), expected)) throw new GameError(401, 'ДОСТУП ЗАПРЕЩЁН: неверный PIN');
   return { token: createSession(role, null), role };
 }

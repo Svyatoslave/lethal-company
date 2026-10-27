@@ -5,7 +5,7 @@ import { setToken } from '../lib/session';
 import TButton from './ui/TButton.vue';
 import Logo from './Logo.vue';
 
-const props = defineProps<{ role: 'admin' | 'operator' }>();
+const props = defineProps<{ role: 'admin' | 'operator' | 'observer' }>();
 const emit = defineEmits<{ authed: [] }>();
 const pin = ref('');
 const error = ref('');
@@ -33,7 +33,7 @@ async function submit() {
     <form class="box" @submit.prevent="submit">
       <Logo />
       <div class="hr" />
-      <div class="label">{{ role === 'admin' ? 'FIELD ADMIN // AUTHORIZATION' : 'OPERATOR TERMINAL // AUTHORIZATION' }}</div>
+      <div class="label">{{ role === 'admin' ? 'FIELD ADMIN' : role === 'observer' ? 'НАБЛЮДАТЕЛЬ' : 'OPERATOR TERMINAL' }} // AUTHORIZATION</div>
       <p class="dim">Введите PIN доступа. Он выводится в консоли сервера при запуске.</p>
       <input v-model="pin" class="input pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="••••" autofocus />
       <div v-if="error" class="err">▲ {{ error }}</div>

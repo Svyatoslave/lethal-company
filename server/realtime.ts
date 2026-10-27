@@ -2,6 +2,7 @@ import type http from 'node:http';
 import type https from 'node:https';
 import { Server, type Socket } from 'socket.io';
 import { actorFor } from './auth.js';
+import { attachCameras } from './cameras.js';
 import { bus, type Actor, type FxTarget } from './game.js';
 import { playerSnapshot, staffSnapshot } from './snapshot.js';
 import type { FxEvent, FxName, Snapshot } from '../shared/types.js';
@@ -51,10 +52,11 @@ function emitFx(name: FxName, payload: FxEvent, targets: FxTarget[]) {
 
 export function attachRealtime(server: http.Server | https.Server) {
   io = new Server(server, { serveClient: false, pingInterval: 10_000, pingTimeout: 8_000 });
+  attachCameras(io);
 
   io.use((socket, next) => {
     const actor = actorFor(socket.handshake.auth?.token);
-    if (!actor) return next(new Error('unauthorized'));
+    if (!actor || actor.role === 'observer') return next(new Error('unauthorized'));
     socket.data.actor = actor;
     next();
   });

@@ -16,6 +16,7 @@ import CommsTab from './admin/CommsTab.vue';
 import EconomyTab from './admin/EconomyTab.vue';
 import ScrapTab from './admin/ScrapTab.vue';
 import LogTab from './admin/LogTab.vue';
+import CameraPanel from '../components/CameraPanel.vue';
 import { pref, setPref } from '../lib/session';
 import '../styles/admin.css';
 
@@ -33,6 +34,7 @@ const TABS = [
   ['crew', 'CREW'],
   ['gate', 'AIRLOCK'],
   ['threat', 'THREAT'],
+  ['cameras', 'КАМЕРЫ'],
   ['comms', 'COMMS'],
   ['econ', 'ECONOMY'],
   ['scrap', 'SCRAP'],
@@ -95,6 +97,7 @@ const pauseReason = ref('');
       <CrewTab v-else-if="tab === 'crew'" :game="game" />
       <GateTab v-else-if="tab === 'gate'" :game="game" />
       <ThreatTab v-else-if="tab === 'threat'" :game="game" />
+      <CameraPanel v-else-if="tab === 'cameras'" app="admin" />
       <CommsTab v-else-if="tab === 'comms'" :game="game" />
       <EconomyTab v-else-if="tab === 'econ'" :game="game" />
       <ScrapTab v-else-if="tab === 'scrap'" :game="game" />
