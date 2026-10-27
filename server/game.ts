@@ -727,6 +727,8 @@ export function claimLoot(token: unknown, actor: Actor) {
     if (typeof token !== 'string' || !TOKEN_RE.test(token)) fail(400, 'СИГНАТУРА НЕ РАСПОЗНАНА');
     const m = mustMission();
     requireRunning(m);
+    // House rule: scrap is registered between raids, never while a group is in the field.
+    if (currentExpedition(m.id)?.status === 'active') fail(423, 'СКАНИРОВАНИЕ ЗАБЛОКИРОВАНО ВО ВРЕМЯ ВЫЛАЗКИ');
     const item = q.get<LootRow>('SELECT * FROM loot WHERE mission_id = ? AND token = ?', m.id, token as string);
     if (!item) {
       const elsewhere = q.get('SELECT 1 FROM loot WHERE token = ?', token as string);

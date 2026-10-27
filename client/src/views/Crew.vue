@@ -42,6 +42,13 @@ const camPreview = ref<HTMLVideoElement | null>(null);
 watch([camPreview, cam.stream], ([el, s]) => {
   if (el && el.srcObject !== s) el.srcObject = s;
 });
+// The gate opened while the scanner was up: close it, scanning is locked during a raid.
+watch(
+  () => state.value?.raidActive,
+  (active) => {
+    if (active) scanning.value = false;
+  },
+);
 // Cameras revoked by the field admin: stop streaming immediately.
 watch(
   () => state.value?.mission?.camsUnlocked,
@@ -75,6 +82,14 @@ const notices = computed(() => {
     .filter((x) => x.channel === 'system')
     .map((x) => ({ id: `m${x.id}`, at: x.createdAt, tag: 'COMPANY', text: x.body, level: 'warn' as const }));
   return [...ev, ...sys].sort((a, b) => b.at - a.at).slice(0, 14);
+});
+/** Why the scan button is locked (null = scanning allowed). The server enforces the same rules. */
+const scanLock = computed(() => {
+  if (!m.value || m.value.status === 'draft') return 'МИССИЯ НЕ ЗАПУЩЕНА';
+  if (m.value.status === 'paused') return 'ИГРА НА ПАУЗЕ';
+  if (m.value.status === 'ended') return 'МИССИЯ ЗАВЕРШЕНА';
+  if (state.value?.raidActive) return 'СКАНИРОВАНИЕ ЗАБЛОКИРОВАНО ВО ВРЕМЯ ВЫЛАЗКИ. ДОСТУПНО МЕЖДУ ВЫЛАЗКАМИ.';
+  return null;
 });
 const fieldCrew = computed(() => state.value?.players.filter((p) => p.role === 'crew' && p.status !== 'AT_BASE') ?? []);
 const orders = computed(() => state.value?.monsterActions ?? []);
@@ -249,7 +264,8 @@ onMounted(async () => {
         </div>
       </section>
 
-      <TButton variant="solid" size="xl" block :disabled="m?.status !== 'active'" @click="scan = null; scanning = true">◎ СКАНИРОВАТЬ ЛУТ</TButton>
+      <TButton variant="solid" size="xl" block :disabled="!!scanLock" @click="scan = null; scanning = true">◎ СКАНИРОВАТЬ ЛУТ</TButton>
+      <div v-if="scanLock" class="scanlock mono">⊘ {{ scanLock }}</div>
       <TButton
         v-if="status === 'OUTSIDE'" variant="warn" size="lg" block
         :busy="busy.has('ret')" @click="act('ret', 'POST', '/expeditions/current/returning', {}, 'Оператор уведомлён')"
@@ -448,6 +464,15 @@ onMounted(async () => {
 .out.off {
   color: var(--red);
   border-color: var(--red);
+}
+.scanlock {
+  margin-top: -4px;
+  padding: 8px 10px;
+  border: 1px dashed rgba(255, 182, 39, 0.5);
+  color: var(--amber);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-align: center;
 }
 .cam.live {
   border-color: var(--red);
