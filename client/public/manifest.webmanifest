@@ -1,0 +1,10 @@
+{
+  "name": "OPERATION: LAST NIGHT",
+  "short_name": "NIGHT RAID",
+  "start_url": "/crew",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#070908",
+  "theme_color": "#070908",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
