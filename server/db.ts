@@ -185,6 +185,23 @@ CREATE TABLE IF NOT EXISTS monster_actions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_mission ON events (mission_id, id);
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY,
+  mission_id INTEGER NOT NULL REFERENCES missions(id),
+  name TEXT NOT NULL,
+  employee_text TEXT NOT NULL,
+  operator_text TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  reward INTEGER NOT NULL DEFAULT 0,
+  token TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'available',
+  player_id INTEGER REFERENCES players(id),
+  started_at INTEGER,
+  completed_at INTEGER,
+  last_attempt_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_mission ON tasks (mission_id, id);
 CREATE INDEX IF NOT EXISTS idx_tx_mission ON transactions (mission_id, id);
 CREATE INDEX IF NOT EXISTS idx_msg_mission ON messages (mission_id, deliver_at);
 `);

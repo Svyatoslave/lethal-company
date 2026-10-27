@@ -10,7 +10,7 @@ const emit = defineEmits<{ detected: [token: string]; close: [] }>();
 
 const video = ref<HTMLVideoElement | null>(null);
 const error = ref('');
-const hint = ref('НАВЕДИТЕ НА QR-МЕТКУ ПРЕДМЕТА');
+const hint = ref('НАВЕДИТЕ НА QR-МЕТКУ ПРЕДМЕТА ИЛИ ТЕРМИНАЛА');
 const torchAvailable = ref(false);
 const torchOn = ref(false);
 let stream: MediaStream | null = null;
@@ -20,8 +20,10 @@ let done = false;
 const canvas = document.createElement('canvas');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-/** Accepts either a full scrap link (…/s/<token>) or a bare token. */
+/** Terminal links retain their kind; bare tokens remain scrap-compatible. */
 function parseToken(raw: string): string | null {
+  const terminal = raw.match(/\/t\/([A-Za-z0-9_-]{10,64})(?:[/?#]|$)/);
+  if (terminal) return `terminal:${terminal[1]}`;
   const link = raw.match(/\/s\/([A-Za-z0-9_-]{10,64})(?:[/?#]|$)/);
   if (link) return link[1];
   return /^[A-Za-z0-9_-]{10,64}$/.test(raw.trim()) ? raw.trim() : null;

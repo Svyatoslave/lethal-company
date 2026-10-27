@@ -42,6 +42,13 @@ export interface PurchaseRow {
 
 export interface Actor { role: Role; playerId: number | null; label: string; playerRole?: 'crew' | 'monster' }
 
+export interface TaskRow {
+  id: number; mission_id: number; name: string; employee_text: string; operator_text: string;
+  answer: string; reward: number; token: string; status: 'available' | 'active' | 'completed';
+  player_id: number | null; started_at: number | null; completed_at: number | null;
+  last_attempt_at: number | null; created_at: number;
+}
+
 // ---------------------------------------------------------------- infra
 
 export class GameError extends Error {
@@ -813,6 +820,109 @@ function messageFx(toType: MessageTo, toPlayerId: number | null, from: string, b
     },
     target: messageTargets(toType, toPlayerId),
   };
+}
+
+// ---------------------------------------------------------------- cooperative terminals
+
+interface TaskOpts {
+  name?: unknown; employeeText?: unknown; operatorText?: unknown; answer?: unknown; reward?: unknown;
+}
+
+const normalizeAnswer = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toUpperCase();
+
+function mustTask(m: MissionRow, id: unknown): TaskRow {
+  return q.get<TaskRow>('SELECT * FROM tasks WHERE id = ? AND mission_id = ?', int(id, 'taskId', 1, 1e9), m.id)
+    ?? fail(404, 'Задание не найдено');
+}
+
+export function saveTask(id: unknown, o: TaskOpts, actor: Actor) {
+  return mutate(() => {
+    if (actor.role !== 'admin') fail(403, 'Недостаточно прав');
+    const m = mustMission();
+    if (m.status === 'ended') fail(409, 'Миссия завершена');
+    const task = id === null ? null : mustTask(m, id);
+    if (task && task.status !== 'available') fail(409, 'Изменять можно только свободный терминал');
+    const name = text(o.name, 'Название', 60);
+    const employee = text(o.employeeText, 'Инструкция сотруднику', 600);
+    const operator = text(o.operatorText, 'Инструкция оператору', 600);
+    const answer = normalizeAnswer(text(o.answer, 'Ответ', 80));
+    const reward = int(o.reward, 'Награда', 0, 1e6);
+    if (task) {
+      q.run('UPDATE tasks SET name = ?, employee_text = ?, operator_text = ?, answer = ?, reward = ? WHERE id = ?',
+        name, employee, operator, answer, reward, task.id);
+    } else {
+      q.run('INSERT INTO tasks (mission_id, name, employee_text, operator_text, answer, reward, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        m.id, name, employee, operator, answer, reward, randomToken(), now());
+    }
+    logEvent(m.id, 'TASK', 'info', `Terminal ${task ? 'updated' : 'created'}: ${name}`, 'admin', actor.label);
+    return { ok: true };
+  });
+}
+
+export function deleteTask(id: unknown, actor: Actor) {
+  return mutate(() => {
+    if (actor.role !== 'admin') fail(403, 'Недостаточно прав');
+    const m = mustMission();
+    const task = mustTask(m, id);
+    if (task.status !== 'available') fail(409, 'Удалять можно только свободный терминал');
+    q.run('DELETE FROM tasks WHERE id = ?', task.id);
+    logEvent(m.id, 'TASK', 'info', `Terminal deleted: ${task.name}`, 'admin', actor.label);
+    return { ok: true };
+  });
+}
+
+export function releaseTask(id: unknown, actor: Actor) {
+  return mutate(() => {
+    if (actor.role !== 'admin') fail(403, 'Недостаточно прав');
+    const m = mustMission();
+    if (m.status === 'ended') fail(409, 'Миссия завершена');
+    const task = mustTask(m, id);
+    if (task.status !== 'active') fail(409, 'Терминал не занят');
+    q.run("UPDATE tasks SET status = 'available', player_id = NULL, started_at = NULL, last_attempt_at = NULL WHERE id = ?", task.id);
+    logEvent(m.id, 'TASK', 'warn', `Terminal released: ${task.name}`, 'staff', actor.label);
+    return { ok: true };
+  });
+}
+
+export function activateTask(token: unknown, actor: Actor) {
+  return mutate(() => {
+    const m = mustMission();
+    requireRunning(m);
+    if (actor.role !== 'player' || mustPlayer(actor.playerId).role !== 'crew') fail(403, 'Терминал доступен только сотрудникам');
+    if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{10,64}$/.test(token)) fail(400, 'СИГНАТУРА НЕ РАСПОЗНАНА');
+    const task = q.get<TaskRow>('SELECT * FROM tasks WHERE mission_id = ? AND token = ?', m.id, token as string);
+    if (!task) fail(404, 'Терминал не найден в текущей миссии');
+    if (task!.status === 'completed') fail(409, 'Задание уже выполнено');
+    if (task!.status === 'active' && task!.player_id !== actor.playerId) fail(409, 'Терминал занят другим сотрудником');
+    if (task!.status === 'available') {
+      q.run("UPDATE tasks SET status = 'active', player_id = ?, started_at = ? WHERE id = ?", actor.playerId, now(), task!.id);
+      logEvent(m.id, 'TASK', 'info', `Terminal activated: ${task!.name} — ${actor.label}`, 'staff', actor.label);
+      fx('system:alert', { type: 'task', level: 'info', title: 'TERMINAL ONLINE', text: `${actor.label}: ${task!.name}. Откройте задания.` }, 'staff');
+    }
+    return { id: task!.id };
+  });
+}
+
+export function solveTask(id: unknown, answer: unknown, actor: Actor) {
+  return mutate(() => {
+    const m = mustMission();
+    requireRunning(m);
+    if (actor.role !== 'player' || mustPlayer(actor.playerId).role !== 'crew') fail(403, 'Терминал доступен только сотрудникам');
+    const task = mustTask(m, id);
+    if (task.player_id !== actor.playerId) fail(403, 'Это задание другого сотрудника');
+    if (task.status === 'completed') return { correct: true, already: true };
+    if (task.status !== 'active') fail(409, 'Сначала отсканируйте терминал');
+    const value = normalizeAnswer(text(answer, 'Ответ', 80));
+    const t = now();
+    if (task.last_attempt_at && t - task.last_attempt_at < 3000) fail(429, 'Подождите три секунды перед следующей попыткой');
+    q.run('UPDATE tasks SET last_attempt_at = ? WHERE id = ?', t, task.id);
+    if (value !== task.answer) return { correct: false, already: false };
+    q.run("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?", t, task.id);
+    if (task.reward) addTx(m.id, task.reward, 'task', `Терминал: ${task.name}`, actor.label, `task:${task.id}`, `task:${task.id}`);
+    logEvent(m.id, 'TASK', 'ok', `Terminal completed: ${task.name} — ${actor.label} (+${task.reward} CR)`, 'all', actor.label);
+    fx('system:alert', { type: 'task', level: 'ok', title: 'TERMINAL COMPLETE', text: `${task.name} · +${task.reward} CR` }, 'staff', { playerId: actor.playerId! });
+    return { correct: true, already: false };
+  });
 }
 
 // ---------------------------------------------------------------- loot

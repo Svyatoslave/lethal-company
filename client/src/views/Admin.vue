@@ -16,6 +16,7 @@ import CommsTab from './admin/CommsTab.vue';
 import EconomyTab from './admin/EconomyTab.vue';
 import ScrapTab from './admin/ScrapTab.vue';
 import LogTab from './admin/LogTab.vue';
+import TasksTab from './admin/TasksTab.vue';
 import { pref, setPref } from '../lib/session';
 import '../styles/admin.css';
 
@@ -37,6 +38,7 @@ const TABS = [
   ['econ', 'ECONOMY'],
   ['scrap', 'SCRAP'],
   ['log', 'LOG'],
+  ['tasks', 'ЗАДАНИЯ'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 const tab = ref<Tab>((pref('adminTab', 'mission') as Tab) ?? 'mission');
@@ -98,6 +100,7 @@ const pauseReason = ref('');
       <CommsTab v-else-if="tab === 'comms'" :game="game" />
       <EconomyTab v-else-if="tab === 'econ'" :game="game" />
       <ScrapTab v-else-if="tab === 'scrap'" :game="game" />
+      <TasksTab v-else-if="tab === 'tasks'" :game="game" />
       <LogTab v-else :game="game" />
     </main>
 

@@ -2,12 +2,12 @@ import { q } from './db.js';
 import { presence } from './presence.js';
 import {
   balanceOf, currentExpedition, currentMission, latestExpedition, quotaProgressOf,
-  type ExpeditionRow, type LootRow, type MissionRow, type PlayerRow, type PurchaseRow, type ShopRow, type TxRow,
+  type ExpeditionRow, type LootRow, type MissionRow, type PlayerRow, type PurchaseRow, type ShopRow, type TxRow, type TaskRow,
 } from './game.js';
 import type {
   CrewStatus, EpStatus, EventView, ExpeditionView, LootView, MessageView, MissionView, MonsterActionView,
   HealthEventView, HealthKind, PlayerView, Role, Snapshot, ShopItemView, PurchaseView, TxView, Visibility, Level, MessageTo, Channel,
-  MonsterActionType, PlayerRole,
+  MonsterActionType, PlayerRole, TaskView,
 } from '../shared/types.js';
 
 function missionView(m: MissionRow): MissionView {
@@ -116,11 +116,25 @@ function healthView(missionId: number, where: string, params: number[], limit: n
   }));
 }
 
+function tasksView(missionId: number, role: Role, playerId: number | null = null): TaskView[] {
+  const rows = q.all<TaskRow & { callsign: string | null }>(
+    `SELECT t.*, p.callsign FROM tasks t LEFT JOIN players p ON p.id = t.player_id
+     WHERE t.mission_id = ?${role === 'player' ? ' AND t.player_id = ?' : ''} ORDER BY t.id`,
+    missionId, ...(role === 'player' ? [playerId] : []),
+  );
+  return rows.map((t) => ({
+    id: t.id, name: t.name, status: t.status, reward: t.reward, playerId: t.player_id, callsign: t.callsign,
+    employeeText: role === 'operator' ? '' : t.employee_text, startedAt: t.started_at, completedAt: t.completed_at,
+    ...(role === 'admin' ? { operatorText: t.operator_text, answer: t.answer, token: t.token } :
+      role === 'operator' && t.status !== 'available' ? { operatorText: t.operator_text } : {}),
+  }));
+}
+
 function emptySnapshot(role: Role, t: number): Snapshot {
   return {
     serverNow: t, role, me: null, mission: null, raidActive: false, balance: 0, quotaProgress: 0, lootStats: { total: 0, found: 0, extracted: 0 },
     expedition: null, players: [], health: [], loot: [], transactions: [], shop: [], purchases: [], messages: [],
-    events: [], monsterActions: [],
+    events: [], monsterActions: [], tasks: [],
   };
 }
 
@@ -142,6 +156,7 @@ export function staffSnapshot(role: 'admin' | 'operator'): Snapshot {
   const exp = latestExpedition(m.id);
   s.mission = missionView(m);
   s.raidActive = currentExpedition(m.id)?.status === 'active';
+  s.tasks = tasksView(m.id, role);
   s.balance = balanceOf(m.id);
   s.quotaProgress = quotaProgressOf(m.id);
   s.lootStats = lootStats(m.id);
@@ -188,6 +203,7 @@ export function playerSnapshot(playerId: number): Snapshot {
   if (!m) return s;
   s.mission = missionView(m);
   s.raidActive = currentExpedition(m.id)?.status === 'active';
+  s.tasks = p.role === 'crew' ? tasksView(m.id, 'player', p.id) : [];
   s.balance = balanceOf(m.id);
   s.quotaProgress = quotaProgressOf(m.id);
   s.lootStats = lootStats(m.id);

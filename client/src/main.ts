@@ -16,6 +16,7 @@ const router = createRouter({
     { path: '/print', component: () => import('./views/Print.vue') },
     // QR targets: scrap tag and personnel badge. Both resolve inside the crew device.
     { path: '/s/:token', redirect: (to) => ({ path: '/crew', query: { claim: String(to.params.token) } }) },
+    { path: '/t/:token', redirect: (to) => ({ path: '/crew', query: { claim: `terminal:${String(to.params.token)}` } }) },
     { path: '/join/:code', redirect: (to) => ({ path: '/crew', query: { code: String(to.params.code) } }) },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

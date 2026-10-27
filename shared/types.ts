@@ -176,6 +176,21 @@ export interface MonsterActionView {
   createdAt: number;
 }
 
+export interface TaskView {
+  id: number;
+  name: string;
+  status: 'available' | 'active' | 'completed';
+  reward: number;
+  playerId: number | null;
+  callsign: string | null;
+  employeeText: string;
+  operatorText?: string;
+  answer?: string;
+  token?: string;
+  startedAt: number | null;
+  completedAt: number | null;
+}
+
 export interface Snapshot {
   serverNow: number;
   role: Role;
@@ -196,6 +211,7 @@ export interface Snapshot {
   messages: MessageView[];
   events: EventView[];
   monsterActions: MonsterActionView[];
+  tasks: TaskView[];
 }
 
 /** Payload of every named realtime effect event (gate:closing, monster:event, ...). */
