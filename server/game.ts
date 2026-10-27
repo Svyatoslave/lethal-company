@@ -355,6 +355,16 @@ export function updateMission(patch: Record<string, unknown>, actor: Actor) {
       fx('system:alert', { type: 'comms', level: patch.commsDisabled ? 'warn' : 'ok', title: patch.commsDisabled ? 'SIGNAL LOST' : 'SIGNAL RESTORED' });
     }
     if (patch.camsUnlocked && !m.cams_unlocked) camsOnlineFx(m, actor);
+    if (patch.overdueDamage !== undefined && Number(patch.overdueDamage) !== m.overdue_damage) {
+      const d = Number(patch.overdueDamage);
+      // A rule change for everyone in the field: announce it like monster damage.
+      logEvent(m.id, 'WARNING', d >= 100 ? 'crit' : 'warn', `Late return now costs ${d}% HP.`, 'all', actor.label);
+      fx('system:alert', {
+        type: 'overdue-damage', level: d >= 100 ? 'crit' : 'warn',
+        title: `УРОН ЗА ОПОЗДАНИЕ: ${d}%`,
+        text: d >= 100 ? 'Опоздание теперь смертельно. Возвращайтесь вовремя.' : `Опоздание отнимает ${d}% здоровья.`,
+      });
+    }
     if (patch.monsterDamage !== undefined && Number(patch.monsterDamage) !== m.monster_damage) {
       const d = Number(patch.monsterDamage);
       const rage = d >= 100;

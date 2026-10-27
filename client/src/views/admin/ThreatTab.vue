@@ -23,6 +23,11 @@ const customDamage = ref(50);
 watch(() => m.value?.monsterDamage, (d) => d !== undefined && (customDamage.value = d), { immediate: true });
 const setDamage = (d: number, ok: string) => act('dmg', 'PATCH', '/missions/current', { monsterDamage: d }, ok);
 
+// ---- overdue damage (same idea: a % of HP, announced to everyone when changed)
+const customOverdue = ref(50);
+watch(() => m.value?.overdueDamage, (d) => d !== undefined && (customOverdue.value = d), { immediate: true });
+const setOverdue = (d: number) => act('odmg', 'PATCH', '/missions/current', { overdueDamage: d }, `Урон за опоздание: ${d}%`);
+
 // ---- private chat with monsters (monsters act on their own; this is their only line)
 const chatWith = ref<number | null>(null);
 watch(monsters, (list) => {
@@ -92,6 +97,22 @@ const KIND: Record<string, string> = { hit: 'УДАР', overdue: 'ОПОЗДАН
       <TButton variant="ghost" :busy="busy.has('dmg')" @click="setDamage(customDamage, `Урон монстров: ${customDamage}%`)">ЗАДАТЬ %</TButton>
     </div>
     <p class="a-note top">Любое изменение урона объявляется всем устройствам. Ярость — для финала игры: один удар забирает всё здоровье.</p>
+  </TPanel>
+
+  <TPanel title="УРОН ЗА ОПОЗДАНИЕ" code="T-0B" :tone="(m?.overdueDamage ?? 0) >= 100 ? 'crit' : undefined">
+    <div class="dmg mono" :class="{ rage: (m?.overdueDamage ?? 0) >= 100 }">{{ m?.overdueDamage ?? 0 }}% <small>HP ЗА ОПОЗДАНИЕ</small></div>
+    <div class="a-grid3">
+      <TButton
+        v-for="d in [25, 50, 100]" :key="d" size="lg" :variant="m?.overdueDamage === d ? 'solid' : d === 100 ? 'danger' : 'ghost'"
+        :disabled="!m || m.overdueDamage === d" :confirm="d === 100 ? 'ВСЕМ ПРИДЁТ ТРЕВОГА. ДА?' : false"
+        :busy="busy.has('odmg')" @click="setOverdue(d)"
+      >{{ d }}%</TButton>
+    </div>
+    <div class="row top">
+      <input v-model.number="customOverdue" class="input grow" type="number" min="0" max="100" />
+      <TButton variant="ghost" :busy="busy.has('odmg')" @click="setOverdue(customOverdue)">ЗАДАТЬ %</TButton>
+    </div>
+    <p class="a-note top">Сколько здоровья теряет сотрудник, не вернувшийся к дедлайну (один раз за вылазку). Изменение объявляется всем устройствам. 0% — опоздание без урона.</p>
   </TPanel>
 
   <TPanel title="ЧАТ С МОНСТРАМИ" code="T-01">
