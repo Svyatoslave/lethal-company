@@ -1,6 +1,7 @@
 import { onUnmounted, ref, shallowRef, watch, type ShallowRef } from 'vue';
 import type { Socket } from 'socket.io-client';
 import { api } from './api';
+import { setMicActive, unlockAudio } from './sound';
 import type { App } from './session';
 
 /*
@@ -98,22 +99,30 @@ export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>, app: A
       return;
     }
     starting.value = true;
+    setMicActive(true);
     const video: MediaTrackConstraints = {
       facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 20 },
     };
     try {
       try {
+        // Voice processing is off on purpose: the phone never plays the operator back, so there is no echo to
+        // cancel, and on Android these filters switch the phone into "call" mode, where game signals become
+        // quiet or come out of the earpiece.
         stream.value = await navigator.mediaDevices.getUserMedia({
-          video, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
         });
       } catch {
         // Microphone denied or missing: stream video only.
         stream.value = await navigator.mediaDevices.getUserMedia({ video, audio: false });
       }
       hasAudio.value = stream.value.getAudioTracks().length > 0;
+      setMicActive(hasAudio.value);
+      // Still inside the tap's activation window: bring signal audio back if capture interrupted it.
+      unlockAudio();
       stream.value.getVideoTracks()[0]?.addEventListener('ended', stop);
       announce();
     } catch {
+      setMicActive(false);
       error.value = 'Нет доступа к камере. Разрешите камеру в настройках браузера.';
     } finally {
       starting.value = false;
@@ -128,6 +137,7 @@ export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>, app: A
     stream.value?.getTracks().forEach((t) => t.stop());
     stream.value = null;
     hasAudio.value = false;
+    setMicActive(false);
     announce();
   }
 
