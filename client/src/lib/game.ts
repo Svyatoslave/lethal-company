@@ -21,6 +21,8 @@ export function useGame(app: App, route: (name: FxName, fx: FxEvent, state: Snap
   const now = ref(Date.now());
   const alerts = ref<Alert[]>([]);
   const busy = reactive(new Set<string>());
+  /** Current socket, exposed for peer-to-peer features (body cams) that signal through the server. */
+  const socketRef = shallowRef<Socket | null>(null);
   let socket: Socket | null = null;
   let seq = 0;
 
@@ -36,7 +38,7 @@ export function useGame(app: App, route: (name: FxName, fx: FxEvent, state: Snap
     const isMessage = name === 'message:received';
     beep(isMessage ? (app === 'crew' ? 'radio' : 'msg') : fx.level);
     if (r === 'toast') return toast(fx.text ? `${fx.title} · ${fx.text}` : fx.title, fx.level);
-    if (isMessage) vibrate([120, 60, 120, 60, 260]);
+    if (isMessage) vibrate(300);
     else if (fx.level === 'crit') vibrate([300, 120, 300, 120, 600]);
     else if (fx.level === 'warn') vibrate([200, 100, 200]);
     const id = ++seq;
@@ -50,6 +52,7 @@ export function useGame(app: App, route: (name: FxName, fx: FxEvent, state: Snap
     if (!token) return void (authed.value = false);
     authed.value = true;
     socket = io({ auth: { token }, transports: ['websocket', 'polling'] });
+    socketRef.value = socket;
     socket.on('connect', () => (connected.value = true));
     socket.on('disconnect', () => (connected.value = false));
     socket.on('connect_error', (err) => {
@@ -72,6 +75,7 @@ export function useGame(app: App, route: (name: FxName, fx: FxEvent, state: Snap
     socket?.removeAllListeners();
     socket?.disconnect();
     socket = null;
+    socketRef.value = null;
     connected.value = false;
   }
 
@@ -109,7 +113,7 @@ export function useGame(app: App, route: (name: FxName, fx: FxEvent, state: Snap
     disconnect();
   });
 
-  return { state, connected, authed, now, alerts, busy, connect, disconnect, logout, dismiss, act };
+  return { state, connected, authed, now, alerts, busy, socket: socketRef, connect, disconnect, logout, dismiss, act };
 }
 
 export type Game = ReturnType<typeof useGame>;

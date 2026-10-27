@@ -1,4 +1,5 @@
 import { q } from './db.js';
+import { presence } from './presence.js';
 import {
   balanceOf, currentMission, latestExpedition, quotaProgressOf,
   type ExpeditionRow, type LootRow, type MissionRow, type PlayerRow, type PurchaseRow, type ShopRow, type TxRow,
@@ -14,7 +15,7 @@ function missionView(m: MissionRow): MissionView {
     id: m.id, code: m.code, name: m.name, status: m.status as MissionView['status'], quota: m.quota,
     startBalance: m.start_balance, durationSec: m.duration_sec, overduePenalty: m.overdue_penalty, crewSize: m.crew_size,
     gate: m.gate as MissionView['gate'], threatLevel: m.threat_level, commsRadio: !!m.comms_radio,
-    commsDisabled: !!m.comms_disabled, messageDelaySec: m.message_delay_sec, timeBonusSec: m.time_bonus_sec,
+    commsDisabled: !!m.comms_disabled, camsUnlocked: !!m.cams_unlocked, messageDelaySec: m.message_delay_sec, timeBonusSec: m.time_bonus_sec,
     pauseReason: m.pause_reason, startedAt: m.started_at, pausedAt: m.paused_at, pausedTotalMs: m.paused_total_ms,
     endedAt: m.ended_at,
   };
@@ -42,7 +43,7 @@ const EP_TO_CREW: Record<EpStatus, CrewStatus> = {
   ready: 'READY', outside: 'OUTSIDE', returning: 'RETURNING', overdue: 'OVERDUE', returned: 'AT_BASE',
 };
 
-function playersView(m: MissionRow | undefined, exp: ExpeditionView | null, online: Set<number>, withCodes: boolean): PlayerView[] {
+function playersView(m: MissionRow | undefined, exp: ExpeditionView | null, withCodes: boolean): PlayerView[] {
   const rows = q.all<PlayerRow>('SELECT * FROM players WHERE active = 1 ORDER BY role, id');
   const pen = new Map<number, number>();
   if (m) {
@@ -55,7 +56,7 @@ function playersView(m: MissionRow | undefined, exp: ExpeditionView | null, onli
     const ep = live?.players.find((x) => x.playerId === p.id);
     return {
       id: p.id, callsign: p.callsign, role: p.role as PlayerRole, joinCode: withCodes ? p.join_code : undefined,
-      status: ep ? EP_TO_CREW[ep.status] : 'AT_BASE', penalties: pen.get(p.id) ?? 0, online: online.has(p.id),
+      status: ep ? EP_TO_CREW[ep.status] : 'AT_BASE', penalties: pen.get(p.id) ?? 0, online: presence.isOnline(p.id), camOn: presence.isCamOn(p.id),
       exitAt: ep?.exitAt ?? null, deadlineAt: ep?.deadlineAt ?? null,
     };
   });
@@ -122,11 +123,11 @@ function lootStats(missionId: number) {
   return { total: r.total, found: (r.found ?? 0) + (r.extracted ?? 0), extracted: r.extracted ?? 0 };
 }
 
-export function staffSnapshot(role: 'admin' | 'operator', online: Set<number>): Snapshot {
+export function staffSnapshot(role: 'admin' | 'operator'): Snapshot {
   const t = Date.now();
   const s = emptySnapshot(role, t);
   const m = currentMission();
-  s.players = playersView(m, null, online, role === 'admin');
+  s.players = playersView(m, null, role === 'admin');
   if (!m) return s;
   const isAdmin = role === 'admin';
   const exp = latestExpedition(m.id);
@@ -135,7 +136,7 @@ export function staffSnapshot(role: 'admin' | 'operator', online: Set<number>): 
   s.quotaProgress = quotaProgressOf(m.id);
   s.lootStats = lootStats(m.id);
   s.expedition = exp ? expeditionView(exp) : null;
-  s.players = playersView(m, s.expedition, online, isAdmin);
+  s.players = playersView(m, s.expedition, isAdmin);
   s.penalties = q.all<{ id: number; player_id: number; callsign: string; reason: string; amount: number; created_at: number; cleared_at: number | null; cleared_note: string | null }>(
     'SELECT pe.*, p.callsign FROM penalties pe JOIN players p ON p.id = pe.player_id WHERE pe.mission_id = ? ORDER BY pe.id DESC',
     m.id,
@@ -181,7 +182,7 @@ export function playerSnapshot(playerId: number): Snapshot {
   const ev = exp ? expeditionView(exp) : null;
   // Crew see their own expedition only; monsters see the field roster to know who is out.
   s.expedition = ev && (p.role === 'monster' || ev.players.some((x) => x.playerId === p.id)) ? ev : null;
-  s.players = playersView(m, ev, new Set(), false).filter((x) => x.id === p.id || (p.role === 'monster' && x.role === 'crew'));
+  s.players = playersView(m, ev, false).filter((x) => x.id === p.id || (p.role === 'monster' && x.role === 'crew'));
   s.penalties = q.all<{ id: number; reason: string; amount: number; created_at: number; cleared_at: number | null; cleared_note: string | null }>(
     'SELECT * FROM penalties WHERE mission_id = ? AND player_id = ? ORDER BY id DESC', m.id, p.id,
   ).map((x): PenaltyView => ({ id: x.id, playerId: p.id, callsign: p.callsign, reason: x.reason, amount: x.amount, createdAt: x.created_at, clearedAt: x.cleared_at, clearedNote: x.cleared_note }));

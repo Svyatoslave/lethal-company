@@ -43,6 +43,9 @@ async function send() {
         {{ m?.commsRadio ? 'ЗАБРАТЬ RADIO' : 'ВЫДАТЬ RADIO' }}
       </TButton>
     </div>
+    <TButton class="top" variant="ghost" block :confirm="m?.camsUnlocked ? 'ОТКЛЮЧИТЬ КАМЕРЫ?' : 'ВЫДАТЬ КАМЕРЫ?'" :busy="busy.has('cams')" @click="act('cams', 'PATCH', '/missions/current', { camsUnlocked: !m?.camsUnlocked })">
+      {{ m?.camsUnlocked ? 'ЗАБРАТЬ BODY CAM' : 'ВЫДАТЬ BODY CAM' }} · {{ state?.players.filter((p) => p.camOn).length ?? 0 }} В ЭФИРЕ
+    </TButton>
     <div class="row top">
       <label class="field grow"><span class="label">Задержка эфира, сек</span><input v-model.number="delay" class="input" type="number" min="0" max="600" /></label>
       <TButton class="sv" :busy="busy.has('delay')" @click="act('delay', 'PATCH', '/missions/current', { messageDelaySec: delay }, 'Задержка сохранена')">OK</TButton>

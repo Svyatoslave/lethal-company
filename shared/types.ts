@@ -28,6 +28,7 @@ export interface MissionView {
   threatLevel: number;
   commsRadio: boolean;
   commsDisabled: boolean;
+  camsUnlocked: boolean;
   messageDelaySec: number;
   timeBonusSec: number;
   pauseReason: string | null;
@@ -69,6 +70,8 @@ export interface PlayerView {
   status: CrewStatus;
   penalties: number;
   online: boolean;
+  /** The player's phone is publishing a body cam stream right now. */
+  camOn: boolean;
   exitAt: number | null;
   deadlineAt: number | null;
 }

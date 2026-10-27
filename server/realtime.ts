@@ -2,22 +2,18 @@ import type http from 'node:http';
 import type https from 'node:https';
 import { Server, type Socket } from 'socket.io';
 import { actorFor } from './auth.js';
-import { bus, type Actor, type FxTarget } from './game.js';
+import { bus, currentMission, type Actor, type FxTarget } from './game.js';
+import { presence } from './presence.js';
 import { playerSnapshot, staffSnapshot } from './snapshot.js';
 import type { FxEvent, FxName, Snapshot } from '../shared/types.js';
 
 let io: Server | null = null;
-const online = new Map<number, number>();
-
-export function onlinePlayers() {
-  return new Set([...online.entries()].filter(([, c]) => c > 0).map(([id]) => id));
-}
 
 function snapshotFor(actor: Actor, cache: Map<string, Snapshot>): Snapshot {
   const key = actor.role === 'player' ? `p${actor.playerId}` : actor.role;
   let s = cache.get(key);
   if (!s) {
-    s = actor.role === 'player' ? playerSnapshot(actor.playerId!) : staffSnapshot(actor.role as 'admin' | 'operator', onlinePlayers());
+    s = actor.role === 'player' ? playerSnapshot(actor.playerId!) : staffSnapshot(actor.role as 'admin' | 'operator');
     cache.set(key, s);
   }
   return s;
@@ -49,6 +45,48 @@ function emitFx(name: FxName, payload: FxEvent, targets: FxTarget[]) {
   io.to([...rooms]).emit(name, payload);
 }
 
+/**
+ * Body cam signaling. Video flows peer-to-peer (WebRTC) from the player's phone to a staff screen;
+ * the server only relays offers/answers/ICE candidates, and only between a player and staff.
+ */
+function bindBodyCam(socket: Socket, actor: Actor) {
+  const camAllowed = () => {
+    const m = currentMission();
+    if (!m || !m.cams_unlocked) return 'BODY CAM НЕ КУПЛЕНА';
+    if (m.comms_disabled) return 'СИГНАЛ ПОТЕРЯН';
+    return null;
+  };
+
+  socket.on('cam:state', (p: { on?: boolean }) => {
+    if (actor.role !== 'player') return;
+    const on = !!p?.on;
+    if (on === !!socket.data.camOn) return;
+    socket.data.camOn = on;
+    if (on) presence.camStarted(actor.playerId!);
+    else presence.camStopped(actor.playerId!);
+    scheduleBroadcast();
+  });
+
+  socket.on('cam:watch', (p: { playerId?: number }) => {
+    if (actor.role === 'player' || typeof p?.playerId !== 'number') return;
+    const blocked = camAllowed();
+    if (blocked) return void socket.emit('cam:error', { playerId: p.playerId, error: blocked });
+    io!.to(`player:${p.playerId}`).emit('cam:request', { from: socket.id });
+  });
+
+  socket.on('cam:signal', (p: { to?: string; data?: unknown }) => {
+    if (typeof p?.to !== 'string' || !p.data || JSON.stringify(p.data).length > 20_000) return;
+    const target = io!.of('/').sockets.get(p.to);
+    const other = target?.data.actor as Actor | undefined;
+    if (!target || !other) return;
+    if (actor.role === 'player' && other.role !== 'player') {
+      target.emit('cam:signal', { from: socket.id, playerId: actor.playerId, data: p.data });
+    } else if (actor.role !== 'player' && other.role === 'player') {
+      target.emit('cam:signal', { from: socket.id, data: p.data });
+    }
+  });
+}
+
 export function attachRealtime(server: http.Server | https.Server) {
   io = new Server(server, { serveClient: false, pingInterval: 10_000, pingTimeout: 8_000 });
 
@@ -63,14 +101,18 @@ export function attachRealtime(server: http.Server | https.Server) {
     const actor = socket.data.actor as Actor;
     if (actor.role === 'player') {
       socket.join(['crew', `player:${actor.playerId}`]);
-      online.set(actor.playerId!, (online.get(actor.playerId!) ?? 0) + 1);
+      presence.connected(actor.playerId!);
     } else {
       socket.join(actor.role);
     }
     socket.emit('state', snapshotFor(actor, new Map()));
     socket.on('sync', () => socket.emit('state', snapshotFor(actor, new Map())));
+    bindBodyCam(socket, actor);
     socket.on('disconnect', () => {
-      if (actor.role === 'player') online.set(actor.playerId!, (online.get(actor.playerId!) ?? 1) - 1);
+      if (actor.role === 'player') {
+        presence.disconnected(actor.playerId!);
+        if (socket.data.camOn) presence.camStopped(actor.playerId!);
+      }
       scheduleBroadcast();
     });
     scheduleBroadcast();

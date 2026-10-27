@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useGame } from '../lib/game';
 import { api } from '../lib/api';
@@ -8,12 +8,14 @@ import {
   audioReady, beep, keepAwake, keepAwakeSupported, muted, startKeepAwake, toggleKeepAwake, toggleMuted, unlockAudio, vibrate,
 } from '../lib/sound';
 
+import { useBodyCamPublisher } from '../lib/bodycam';
+
 const canVibrate = 'vibrate' in navigator;
 function testSignal() {
   unlockAudio();
   if (muted.value) toggleMuted();
   beep('radio');
-  vibrate([120, 60, 120, 60, 260]);
+  vibrate(300);
 }
 import { CREW_LABEL, CREW_TONE, GATE_TONE, MISSION_LABEL, MISSION_TONE, clock, cr } from '../lib/format';
 import AlertLayer from '../components/AlertLayer.vue';
@@ -35,6 +37,18 @@ const game = useGame('crew', (name, fx, s) => {
   return 'alert';
 });
 const { state, now, authed, connected, alerts, dismiss, connect, logout, act, busy } = game;
+const cam = useBodyCamPublisher(game.socket);
+const camPreview = ref<HTMLVideoElement | null>(null);
+watch([camPreview, cam.stream], ([el, s]) => {
+  if (el && el.srcObject !== s) el.srcObject = s;
+});
+// Cameras revoked by the field admin: stop streaming immediately.
+watch(
+  () => state.value?.mission?.camsUnlocked,
+  (on) => {
+    if (on === false && cam.stream.value) cam.stop();
+  },
+);
 
 const PENDING = 'olnr.pendingClaim';
 const code = ref('');
@@ -241,6 +255,27 @@ onMounted(async () => {
         :busy="busy.has('ret')" @click="act('ret', 'POST', '/expeditions/current/returning', {}, 'Оператор уведомлён')"
       >ВОЗВРАЩАЮСЬ НА БАЗУ</TButton>
 
+      <section v-if="m?.camsUnlocked" class="card cam" :class="{ live: cam.stream.value }">
+        <div class="row">
+          <span class="label grow">BODY CAM</span>
+          <span v-if="cam.stream.value && cam.viewers.value" class="rec mono"><i />В ЭФИРЕ · СМОТРЯТ {{ cam.viewers.value }}</span>
+          <span v-else-if="cam.stream.value" class="mono small acc">КАМЕРА ГОТОВА</span>
+        </div>
+        <template v-if="cam.stream.value">
+          <video ref="camPreview" class="preview" autoplay playsinline muted />
+          <p class="mute small">
+            Оператор может видеть<template v-if="cam.hasAudio.value"> и слышать</template> вас, когда подключается. Вы его не слышите.
+            Держите телефон камерой вперёд и не блокируйте экран.
+          </p>
+          <TButton variant="ghost" block @click="cam.stop">ВЫКЛЮЧИТЬ КАМЕРУ</TButton>
+        </template>
+        <template v-else>
+          <p class="dim locked">Компания купила камеры. Включите BODY CAM — оператор сможет смотреть и слушать прямой эфир с вашего телефона.</p>
+          <div v-if="cam.error.value" class="err mono">▲ {{ cam.error.value }}</div>
+          <TButton variant="warn" size="lg" block :busy="cam.starting.value" @click="cam.start">◉ ВКЛЮЧИТЬ BODY CAM</TButton>
+        </template>
+      </section>
+
       <section v-if="scan" class="card result" :class="{ ok: scan.ok, bad: !scan.ok }" @click="scan = null">
         <div class="rt mono">{{ scan.ok ? '✓' : '◆' }} {{ scan.title }}</div>
         <template v-if="scan.data">
@@ -320,7 +355,7 @@ onMounted(async () => {
       ПРИ РЕАЛЬНОЙ ОПАСНОСТИ ИГРА ОСТАНАВЛИВАЕТСЯ. НЕ БЕГАЙТЕ В ТЕМНОТЕ. НЕ ПОКИДАЙТЕ ТЕРРИТОРИЮ.
     </footer>
 
-    <Scanner v-if="scanning" @detected="claim" @close="scanning = false" />
+    <Scanner v-if="scanning" :stream="cam.stream.value" @detected="claim" @close="scanning = false" />
 
     <div v-if="m?.status === 'paused'" class="curtain">
       <div class="cbox">
@@ -413,6 +448,31 @@ onMounted(async () => {
 .out.off {
   color: var(--red);
   border-color: var(--red);
+}
+.cam.live {
+  border-color: var(--red);
+}
+.preview {
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  background: #000;
+  filter: grayscale(0.6) contrast(1.1);
+}
+.rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--red);
+  letter-spacing: 0.08em;
+}
+.rec i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: blink 1s steps(2) infinite;
 }
 .unlock {
   display: flex;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useGame } from '../lib/game';
 import { clock, cr, missionElapsed, mmss } from '../lib/format';
 import { muted, toggleMuted } from '../lib/sound';
@@ -14,6 +14,14 @@ import CrewPanel from './operator/CrewPanel.vue';
 import ScrapPanel from './operator/ScrapPanel.vue';
 import StorePanel from './operator/StorePanel.vue';
 import CommsPanel from './operator/CommsPanel.vue';
+import CamMonitor from './operator/CamMonitor.vue';
+
+const camOpen = ref(false);
+const camFocus = ref<number | null>(null);
+function openCams(playerId: number | null = null) {
+  camFocus.value = playerId;
+  camOpen.value = true;
+}
 
 const game = useGame('operator', (name) => {
   if (name === 'economy:updated' || name === 'loot:extracted') return 'ignore';
@@ -32,6 +40,7 @@ const sys = computed(() => {
   if (m.value.threatLevel >= 3 || m.value.commsDisabled) return { label: 'WARNING', tone: 'warn' };
   return { label: 'ONLINE', tone: 'ok' };
 });
+const camsLive = computed(() => state.value?.players.filter((p) => p.camOn).length ?? 0);
 const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((state.value?.quotaProgress ?? 0) / m.value.quota) * 100)) : 0));
 </script>
 
@@ -65,6 +74,9 @@ const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((sta
         <span class="label">LOCAL</span>
         <b class="mono dim">{{ clock(now) }}</b>
       </div>
+      <button v-if="m?.camsUnlocked" type="button" class="camsbtn mono" @click="openCams()">
+        <i :class="{ live: camsLive }" />BODY CAMS<b>{{ camsLive }}</b>
+      </button>
       <div class="tools">
         <button type="button" class="tool" :title="muted ? 'звук выключен' : 'звук включён'" @click="toggleMuted">{{ muted ? 'SND OFF' : 'SND ON' }}</button>
         <button type="button" class="tool" @click="logout">EXIT</button>
@@ -82,7 +94,7 @@ const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((sta
         <StorePanel :game="game" class="fill" />
       </div>
       <div class="col">
-        <CrewPanel :game="game" />
+        <CrewPanel :game="game" @watch="openCams" />
         <ScrapPanel :game="game" class="fill" />
       </div>
       <div class="col">
@@ -92,6 +104,7 @@ const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((sta
         <CommsPanel :game="game" class="comms" />
       </div>
     </main>
+    <CamMonitor v-if="camOpen" :game="game" :focus="camFocus" @close="camOpen = false" />
     <AlertLayer :alerts="alerts" @dismiss="dismiss" />
   </div>
 </template>
@@ -171,6 +184,37 @@ const quotaPct = computed(() => (m.value?.quota ? Math.min(100, Math.round(((sta
 }
 .sys.crit i {
   animation: blink 0.7s steps(2) infinite;
+}
+.camsbtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+.camsbtn:hover {
+  background: var(--panel-3);
+}
+.camsbtn i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.camsbtn i.live {
+  background: var(--red);
+  box-shadow: 0 0 8px var(--red);
+  animation: blink 1.2s steps(2) infinite;
+}
+.camsbtn b {
+  color: var(--acc);
+  font-size: 15px;
 }
 .tools {
   display: flex;

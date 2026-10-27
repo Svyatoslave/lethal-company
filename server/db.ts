@@ -194,6 +194,10 @@ const lootCols = db.prepare('PRAGMA table_info(loot)').all() as { name: string }
 if (!lootCols.some((c) => c.name === 'description')) {
   db.exec("ALTER TABLE loot ADD COLUMN description TEXT NOT NULL DEFAULT ''");
 }
+const missionCols = db.prepare('PRAGMA table_info(missions)').all() as { name: string }[];
+if (!missionCols.some((c) => c.name === 'cams_unlocked')) {
+  db.exec('ALTER TABLE missions ADD COLUMN cams_unlocked INTEGER NOT NULL DEFAULT 0');
+}
 
 const cache = new Map<string, StatementSync>();
 function prep(sql: string): StatementSync {

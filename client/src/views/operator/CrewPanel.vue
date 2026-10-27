@@ -8,6 +8,7 @@ import TChip from '../../components/ui/TChip.vue';
 import Countdown from '../../components/ui/Countdown.vue';
 
 const props = defineProps<{ game: Game }>();
+const emit = defineEmits<{ watch: [playerId: number] }>();
 const { state, now, act, busy } = props.game;
 
 const m = computed(() => state.value?.mission ?? null);
@@ -70,6 +71,7 @@ async function form() {
             <td class="cs">
               <span class="dot" :class="{ on: p.online }" :title="p.online ? 'device online' : 'device offline'" />
               {{ p.callsign }}
+              <button v-if="p.camOn" type="button" class="cam mono" title="Смотреть BODY CAM" @click.stop="emit('watch', p.id)">◉ CAM</button>
             </td>
             <td><TChip :label="CREW_LABEL[p.status]" :tone="CREW_TONE[p.status]" :pulse="p.status === 'OVERDUE'" /></td>
             <td class="mono dim">{{ p.exitAt ? clock(p.exitAt, false) : '—' }}</td>
@@ -180,6 +182,21 @@ tr.overdue {
 .dot.on {
   background: var(--acc);
   box-shadow: 0 0 5px var(--acc);
+}
+.cam {
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: var(--red-dim);
+  border: 1px solid var(--red);
+  color: #ff7a6e;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.cam:hover {
+  background: var(--red);
+  color: #fff;
 }
 .pen {
   color: var(--red);

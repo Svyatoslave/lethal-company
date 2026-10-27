@@ -48,13 +48,10 @@ const PATTERNS: Record<string, { gain: number; notes: Note[] }> = {
   ok: { gain: 0.06, notes: [[880, 0.07, 'square'], [1320, 0.09, 'square']] },
   info: { gain: 0.06, notes: [[660, 0.06, 'square']] },
   msg: { gain: 0.06, notes: [[990, 0.05, 'square'], [0, 0.04, 'square'], [990, 0.05, 'square']] },
-  // Walkie-talkie: squelch burst, then a rising two-tone chirp, repeated. Loud enough for a pocket.
+  // Walkie-talkie: one squelch burst and a rising two-tone chirp. Loud enough for a pocket, played once per message.
   radio: {
     gain: 0.3,
-    notes: [
-      [0, 0.12, 'noise'], [0, 0.04, 'square'], [1200, 0.09, 'square'], [1600, 0.12, 'square'], [0, 0.14, 'square'],
-      [0, 0.08, 'noise'], [0, 0.04, 'square'], [1200, 0.09, 'square'], [1600, 0.16, 'square'],
-    ],
+    notes: [[0, 0.14, 'noise'], [0, 0.04, 'square'], [1200, 0.1, 'square'], [1600, 0.18, 'square']],
   },
   warn: { gain: 0.08, notes: [[440, 0.12, 'sawtooth'], [0, 0.06, 'square'], [440, 0.12, 'sawtooth']] },
   crit: { gain: 0.1, notes: [[220, 0.18, 'sawtooth'], [180, 0.18, 'sawtooth'], [220, 0.18, 'sawtooth'], [180, 0.25, 'sawtooth']] },

@@ -4,6 +4,8 @@ import jsQR from 'jsqr';
 import { vibrate } from '../lib/sound';
 import TButton from './ui/TButton.vue';
 
+/** When the body cam is already streaming, the scanner reads the same camera instead of opening it twice. */
+const props = defineProps<{ stream?: MediaStream | null }>();
 const emit = defineEmits<{ detected: [token: string]; close: [] }>();
 
 const video = ref<HTMLVideoElement | null>(null);
@@ -54,10 +56,12 @@ async function start() {
     return;
   }
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-    });
+    stream = props.stream
+      ? new MediaStream(props.stream.getVideoTracks())
+      : await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
     if (!video.value) return stop();
     video.value.srcObject = stream;
     await video.value.play();
@@ -83,7 +87,8 @@ async function toggleTorch() {
 
 function stop() {
   cancelAnimationFrame(raf);
-  stream?.getTracks().forEach((t) => t.stop());
+  // A borrowed body cam track keeps streaming to the operator after the scanner closes.
+  if (!props.stream) stream?.getTracks().forEach((t) => t.stop());
   stream = null;
 }
 

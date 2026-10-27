@@ -8,7 +8,7 @@ import type { FxEvent, FxName, Level, MessageTo, MonsterActionType, Role, Visibi
 export interface MissionRow {
   id: number; code: string; name: string; status: string; quota: number; start_balance: number;
   duration_sec: number; overdue_penalty: number; crew_size: number; gate: string; threat_level: number;
-  comms_radio: number; comms_disabled: number; message_delay_sec: number; time_bonus_sec: number;
+  comms_radio: number; comms_disabled: number; message_delay_sec: number; time_bonus_sec: number; cams_unlocked: number;
   pause_reason: string | null; started_at: number | null; paused_at: number | null; paused_total_ms: number;
   ended_at: number | null; created_at: number;
 }
@@ -190,6 +190,8 @@ function addTx(
 const DEFAULT_SHOP = [
   { key: 'radio', name: 'RADIO', price: 150, effect: 0, max: 1,
     description: 'Разблокирует прямую связь оператора с экипажем через устройства.' },
+  { key: 'bodycam', name: 'BODY CAM', price: 300, effect: 0, max: 1,
+    description: 'Камеры сотрудников: оператор смотрит прямой эфир с телефонов экипажа.' },
   { key: 'medkit', name: 'MEDKIT', price: 100, effect: 1, max: 0,
     description: 'Снимает один игровой штраф с выбранного сотрудника.' },
   { key: 'time_ext', name: 'TIME EXTENSION', price: 200, effect: 300, max: 0,
@@ -199,6 +201,24 @@ const DEFAULT_SHOP = [
   { key: 'extraction', name: 'EMERGENCY EXTRACTION', price: 400, effect: 0, max: 0,
     description: 'Даёт ведущему право объявить досрочную эвакуацию без штрафов за опоздание.' },
 ];
+
+function camsOnlineFx(m: MissionRow, actor: Actor) {
+  logEvent(m.id, 'CAM', 'ok', 'Body camera network online. The Company is watching.', 'all', actor.label);
+  fx('system:alert', { type: 'cams', level: 'warn', title: 'BODY CAMS ONLINE', text: 'Включите BODY CAM на своём устройстве' });
+}
+
+/** Adds any missing default items; existing items (and their edited prices) are left alone. */
+function seedShop(missionId: number) {
+  DEFAULT_SHOP.forEach((s, i) =>
+    q.run(
+      `INSERT OR IGNORE INTO shop_items (mission_id, key, name, description, price, effect_value, max_purchases, sort)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      missionId, s.key, s.name, s.description, s.price, s.effect, s.max, i,
+    ),
+  );
+}
+// Missions created before an item existed (e.g. BODY CAM) get it on startup.
+for (const { id } of q.all<{ id: number }>("SELECT id FROM missions WHERE status <> 'ended'")) seedShop(id);
 
 export interface MissionOpts {
   name?: unknown; quota?: unknown; startBalance?: unknown; durationSec?: unknown;
@@ -224,13 +244,7 @@ export function createMission(o: MissionOpts, actor: Actor) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       code, name, quota, startBalance, duration, penalty, crewSize, now(),
     ).id;
-    DEFAULT_SHOP.forEach((s, i) =>
-      q.run(
-        `INSERT INTO shop_items (mission_id, key, name, description, price, effect_value, max_purchases, sort)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        id, s.key, s.name, s.description, s.price, s.effect, s.max, i,
-      ),
-    );
+    seedShop(id);
     if (startBalance > 0) addTx(id, startBalance, 'start', 'Стартовый бюджет корпорации', actor.label, `start:${id}`);
     if (o.copyLoot && prev) {
       q.run(
@@ -320,6 +334,7 @@ export function updateMission(patch: Record<string, unknown>, actor: Actor) {
     if (patch.timeBonusSec !== undefined) sets.push(['time_bonus_sec', int(patch.timeBonusSec, 'Бонус времени', 0, 6 * 3600)]);
     if (patch.commsDisabled !== undefined) sets.push(['comms_disabled', patch.commsDisabled ? 1 : 0]);
     if (patch.commsRadio !== undefined) sets.push(['comms_radio', patch.commsRadio ? 1 : 0]);
+    if (patch.camsUnlocked !== undefined) sets.push(['cams_unlocked', patch.camsUnlocked ? 1 : 0]);
     if (!sets.length) return;
     q.run(`UPDATE missions SET ${sets.map(([k]) => `${k} = ?`).join(', ')} WHERE id = ?`, ...sets.map(([, v]) => v), m.id);
     logEvent(m.id, 'ADMIN', 'info', `Settings changed: ${sets.map(([k, v]) => `${k}=${v}`).join(', ')}`, 'admin', actor.label);
@@ -328,6 +343,7 @@ export function updateMission(patch: Record<string, unknown>, actor: Actor) {
         patch.commsDisabled ? 'Signal lost. Radio link interrupted.' : 'Signal restored.', 'all', actor.label);
       fx('system:alert', { type: 'comms', level: patch.commsDisabled ? 'warn' : 'ok', title: patch.commsDisabled ? 'SIGNAL LOST' : 'SIGNAL RESTORED' });
     }
+    if (patch.camsUnlocked && !m.cams_unlocked) camsOnlineFx(m, actor);
     if (patch.commsRadio && !m.comms_radio) {
       logEvent(m.id, 'COMMS', 'ok', 'Signal established. Direct radio link online.', 'all', actor.label);
       fx('comms:unlocked', { type: 'comms', level: 'ok', title: 'SIGNAL ESTABLISHED', text: 'Прямая связь доступна' });
@@ -930,6 +946,7 @@ export function purchase(itemId: unknown, o: { requestId?: unknown; targetPlayer
     let target: PlayerRow | null = null;
     let penaltyId: number | null = null;
     if (item.key === 'radio' && m.comms_radio) fail(409, 'Связь уже установлена');
+    if (item.key === 'bodycam' && m.cams_unlocked) fail(409, 'Камеры уже подключены');
     if (item.key === 'medkit') {
       target = mustPlayer(o.targetPlayerId);
       penaltyId = q.get<{ id: number }>(
@@ -953,6 +970,11 @@ export function purchase(itemId: unknown, o: { requestId?: unknown; targetPlayer
         done('Связь установлена');
         logEvent(m.id, 'COMMS', 'ok', 'Signal established. Direct radio link online.', 'all', actor.label);
         fx('comms:unlocked', { type: 'comms', level: 'ok', title: 'SIGNAL ESTABLISHED', text: 'Прямая связь доступна' });
+        break;
+      case 'bodycam':
+        q.run('UPDATE missions SET cams_unlocked = 1 WHERE id = ?', m.id);
+        done('Камеры подключены');
+        camsOnlineFx(m, actor);
         break;
       case 'medkit':
         q.run('UPDATE penalties SET cleared_at = ?, cleared_note = ? WHERE id = ?', now(), `MEDKIT #${pid}`, penaltyId);

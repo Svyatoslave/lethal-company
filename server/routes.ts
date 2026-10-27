@@ -2,7 +2,6 @@ import express, { type Request, type Response } from 'express';
 import * as g from './game.js';
 import { actorFor, join, login, logout } from './auth.js';
 import { playerSnapshot, staffSnapshot } from './snapshot.js';
-import { onlinePlayers } from './realtime.js';
 import type { Role } from '../shared/types.js';
 
 type Handler = (req: Request, actor: g.Actor) => unknown;
@@ -47,7 +46,7 @@ api.post('/auth/join', (req, res) => send(res, () => join(req.body?.code, req.ip
 api.post('/auth/logout', (req, res) => send(res, () => logout(bearer(req))));
 api.get('/auth/me', as(ANY, (_req, a) => a));
 api.get('/state', as(ANY, (_req, a) =>
-  a.role === 'player' ? playerSnapshot(a.playerId!) : staffSnapshot(a.role as 'admin' | 'operator', onlinePlayers())));
+  a.role === 'player' ? playerSnapshot(a.playerId!) : staffSnapshot(a.role as 'admin' | 'operator')));
 
 // missions
 api.post('/missions', as(ADMIN, (req, a) => g.createMission(req.body ?? {}, a)));
@@ -87,7 +86,7 @@ api.post('/loot', as(ADMIN, (req, a) => g.createLoot(req.body ?? {}, a)));
 api.post('/loot/import', as(ADMIN, (req, a) => g.importLoot(req.body?.list, a)));
 api.patch('/loot/:id', as(ADMIN, (req, a) => g.updateLoot(req.params.id, req.body ?? {}, a)));
 api.delete('/loot/:id', as(ADMIN, (req, a) => g.deleteLoot(req.params.id, a)));
-api.get('/print', as(ADMIN, () => ({ loot: g.lootForPrint(), players: staffSnapshot('admin', new Set()).players })));
+api.get('/print', as(ADMIN, () => ({ loot: g.lootForPrint(), players: staffSnapshot('admin').players })));
 
 // store & economy
 api.post('/shop/:itemId/purchase', as(STAFF, (req, a) => g.purchase(req.params.itemId, req.body ?? {}, a)));
