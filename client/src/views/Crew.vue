@@ -91,6 +91,7 @@ const scanLock = computed(() => {
   if (!m.value || m.value.status === 'draft') return 'МИССИЯ НЕ ЗАПУЩЕНА';
   if (m.value.status === 'paused') return 'ИГРА НА ПАУЗЕ';
   if (m.value.status === 'ended') return 'МИССИЯ ЗАВЕРШЕНА';
+  if (myHp.value <= 0) return 'ВЫ ВЫВЕДЕНЫ ИЗ СТРОЯ. СКАНИРОВАНИЕ НЕДОСТУПНО ДО ЛЕЧЕНИЯ.';
   if (state.value?.raidActive) return 'СКАНИРОВАНИЕ ЗАБЛОКИРОВАНО ВО ВРЕМЯ ВЫЛАЗКИ. ДОСТУПНО МЕЖДУ ВЫЛАЗКАМИ.';
   return null;
 });
@@ -292,7 +293,7 @@ onMounted(async () => {
       <section class="card hpc" :class="{ down: myHp <= 0 }">
         <span class="label">ЗДОРОВЬЕ</span>
         <HpBar :hp="myHp" size="lg" />
-        <p v-if="myHp <= 0" class="downt mono">ВЫ ВЫВЕДЕНЫ ИЗ СТРОЯ. ВОЗВРАЩАЙТЕСЬ НА БАЗУ ШАГОМ И СООБЩИТЕ ВЕДУЩЕМУ. НУЖНА АПТЕЧКА.</p>
+        <p v-if="myHp <= 0" class="downt mono">ВЫ ВЫВЕДЕНЫ ИЗ СТРОЯ. ЕСЛИ ВЫ ЗА ШЛЮЗОМ — ВОЗВРАЩАЙТЕСЬ НА БАЗУ ШАГОМ. ДО ЛЕЧЕНИЯ НЕЛЬЗЯ ВЫХОДИТЬ ЗА ШЛЮЗ И СКАНИРОВАТЬ ЛУТ. ВЕРНУТЬ В СТРОЙ МОЖЕТ ТОЛЬКО АПТЕЧКА.</p>
         <p v-else class="mute small">Здоровье не восстанавливается само — лечит только MEDKIT.</p>
         <p class="mute small mono">ОПОЗДАНИЕ −{{ m?.overdueDamage ?? 0 }}% · УДАР МОНСТРА −{{ m?.monsterDamage ?? 0 }}%</p>
         <div v-for="h in myHealth" :key="h.id" class="hlog mono" :class="h.delta < 0 ? 'neg' : 'pos'">

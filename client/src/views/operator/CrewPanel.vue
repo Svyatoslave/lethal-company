@@ -31,6 +31,8 @@ watch(
 );
 
 function toggle(id: number) {
+  // A downed player (0% HP) stays aboard until healed.
+  if (crew.value.find((p) => p.id === id)?.hp === 0) return;
   if (picked.has(id)) picked.delete(id);
   else if (picked.size < size.value) picked.add(id);
 }
@@ -65,9 +67,9 @@ async function form() {
           <tr v-if="!crew.length">
             <td colspan="7" class="empty">// ПЕРСОНАЛ НЕ ЗАРЕГИСТРИРОВАН. ДОБАВЬТЕ СОТРУДНИКОВ В FIELD ADMIN.</td>
           </tr>
-          <tr v-for="p in rows" :key="p.id" :class="[p.status.toLowerCase(), { picked: picked.has(p.id) }]" @click="canForm && toggle(p.id)">
+          <tr v-for="p in rows" :key="p.id" :class="[p.status.toLowerCase(), { picked: picked.has(p.id), down: p.hp <= 0 }]" @click="canForm && toggle(p.id)">
             <td v-if="canForm" class="sel">
-              <span class="box" :class="{ on: picked.has(p.id) }">{{ picked.has(p.id) ? '■' : '' }}</span>
+              <span class="box" :class="{ on: picked.has(p.id) }" :title="p.hp <= 0 ? 'Выведен из строя — нужна аптечка' : undefined">{{ p.hp <= 0 ? '✕' : picked.has(p.id) ? '■' : '' }}</span>
             </td>
             <td class="cs">
               <span class="dot" :class="{ on: p.online }" :title="p.online ? 'device online' : 'device offline'" />
@@ -91,7 +93,7 @@ async function form() {
                 @click="act(`ret${p.id}`, 'POST', '/expeditions/current/return', { playerId: p.id })"
               >ВЕРНУЛСЯ</TButton>
               <TButton
-                v-else-if="p.status === 'READY' && exp?.status === 'active'"
+                v-else-if="p.status === 'READY' && exp?.status === 'active' && p.hp > 0"
                 size="sm" variant="warn" :busy="busy.has(`exit${p.id}`)"
                 @click="act(`exit${p.id}`, 'POST', '/expeditions/current/exit', { playerId: p.id })"
               >ВЫПУСТИТЬ</TButton>
@@ -146,6 +148,13 @@ tbody tr:hover {
 }
 tr.picked {
   background: rgba(156, 255, 58, 0.06);
+}
+tr.down td {
+  opacity: 0.55;
+}
+tr.down .box {
+  color: var(--red);
+  border-color: var(--red);
 }
 tr.overdue {
   background: var(--red-dim);

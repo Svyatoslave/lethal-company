@@ -208,6 +208,13 @@ if (!missionCols.some((c) => c.name === 'overdue_damage')) {
     WHERE key = 'medkit' AND effect_value = 1`);
 }
 
+// House rule: one MEDKIT heals 25% (was 50%). Only rows still at an old default are touched, so a price/effect
+// the admin set on purpose is kept. Runs once.
+if (!db.prepare("SELECT 1 FROM kv WHERE key = 'migr_medkit25'").get()) {
+  db.exec("UPDATE shop_items SET effect_value = 25 WHERE key = 'medkit' AND effect_value IN (1, 50)");
+  db.exec("INSERT INTO kv (key, value) VALUES ('migr_medkit25', '1')");
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS health (
   mission_id INTEGER NOT NULL REFERENCES missions(id),
