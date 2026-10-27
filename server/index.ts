@@ -88,4 +88,5 @@ server.listen(HTTPS_PORT, () => {
   for (const host of ['localhost', ...lanAddresses()]) console.log(`  ${proto}://${host}:${HTTPS_PORT}`);
   console.log(`${line}\n  FIELD ADMIN PIN : ${pins.adminPin}\n  OPERATOR PIN    : ${pins.operatorPin}`);
   console.log(`  (change in ${path.join(DATA_DIR, 'secrets.json')} or ADMIN_PIN / OPERATOR_PIN env)\n${line}\n`);
+  console.log(`  OBSERVER PIN   : ${pins.observerPin}`);
 });

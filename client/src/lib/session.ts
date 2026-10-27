@@ -1,4 +1,4 @@
-export type App = 'admin' | 'operator' | 'crew';
+export type App = 'admin' | 'operator' | 'crew' | 'observer';
 
 const key = (app: App) => `olnr.${app}.token`;
 const memory = new Map<App, string>();

@@ -1,6 +1,6 @@
 // Shared contract between server snapshots and clients.
 
-export type Role = 'admin' | 'operator' | 'player';
+export type Role = 'admin' | 'operator' | 'player' | 'observer';
 export type PlayerRole = 'crew' | 'monster';
 export type MissionStatus = 'draft' | 'active' | 'paused' | 'ended';
 export type GateStatus = 'open' | 'closing' | 'closed';
