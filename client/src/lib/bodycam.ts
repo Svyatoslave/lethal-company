@@ -1,19 +1,37 @@
 import { onUnmounted, ref, shallowRef, watch, type ShallowRef } from 'vue';
 import type { Socket } from 'socket.io-client';
+import { api } from './api';
+import type { App } from './session';
 
 /*
  * Body cams: one-way WebRTC. The player's phone publishes camera + microphone; staff screens receive.
  * The phone never adds a receiving track and never plays remote audio, so a player cannot hear the operator.
- * Video goes peer-to-peer over the local network; the server only relays signaling (see server/realtime.ts).
- * STUN helps when devices are on different networks; on an offline LAN the direct host candidates are used.
+ * Video goes peer-to-peer; the server only relays signaling (see server/realtime.ts). Inside one Wi-Fi the
+ * direct host candidates work; across the internet the server-provided TURN relay carries the video.
  */
-const ICE: RTCConfiguration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const FALLBACK_ICE: RTCConfiguration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const iceCache = new Map<App, { cfg: RTCConfiguration; until: number }>();
+
+/** ICE servers from the game server, including short-lived TURN credentials when a relay is configured. */
+async function iceConfig(app: App): Promise<RTCConfiguration> {
+  const hit = iceCache.get(app);
+  if (hit && hit.until > Date.now()) return hit.cfg;
+  try {
+    const r = await api<{ iceServers: RTCIceServer[]; ttlSec: number }>(app, 'GET', '/ice');
+    const cfg: RTCConfiguration = { iceServers: r.iceServers };
+    // Refresh well before the TURN credentials expire.
+    iceCache.set(app, { cfg, until: Date.now() + (r.ttlSec * 1000) / 2 });
+    return cfg;
+  } catch {
+    return FALLBACK_ICE;
+  }
+}
 
 type Signal = { sdp?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit; type?: 'bye' | 'unavailable' };
 
 // ------------------------------------------------------------------ publisher (crew phone)
 
-export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>) {
+export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>, app: App = 'crew') {
   const stream = shallowRef<MediaStream | null>(null);
   const viewers = ref(0);
   const error = ref('');
@@ -32,7 +50,9 @@ export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>) {
     if (!s) return;
     if (!stream.value) return void s.emit('cam:signal', { to: from, data: { type: 'unavailable' } });
     dropPeer(from);
-    const pc = new RTCPeerConnection(ICE);
+    const cfg = await iceConfig(app);
+    if (!stream.value) return;
+    const pc = new RTCPeerConnection(cfg);
     peers.set(from, pc);
     viewers.value = peers.size;
     for (const t of stream.value.getTracks()) pc.addTransceiver(t, { direction: 'sendonly', streams: [stream.value] });
@@ -126,27 +146,18 @@ export type FeedState = 'connecting' | 'live' | 'offline' | 'error';
 /** Opens one receive-only connection to a player's body cam. Returns a cleanup function. */
 export function watchBodyCam(
   socket: Socket,
+  app: App,
   playerId: number,
   onStream: (s: MediaStream) => void,
   onState: (s: FeedState, detail?: string) => void,
 ): () => void {
-  const pc = new RTCPeerConnection(ICE);
+  let pc: RTCPeerConnection | null = null;
   let peer: string | null = null;
   const pending: RTCIceCandidateInit[] = [];
   let closed = false;
 
-  pc.ontrack = (e) => {
-    onStream(e.streams[0] ?? new MediaStream([e.track]));
-    onState('live');
-  };
-  pc.onicecandidate = (e) => e.candidate && peer && socket.emit('cam:signal', { to: peer, data: { candidate: e.candidate.toJSON() } });
-  pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed') onState('error', 'НЕТ ПРЯМОГО СОЕДИНЕНИЯ');
-    if (pc.connectionState === 'disconnected') onState('offline');
-  };
-
   const onSignal = async ({ from, playerId: pid, data }: { from: string; playerId: number; data: Signal }) => {
-    if (pid !== playerId || closed) return;
+    if (pid !== playerId || closed || !pc) return;
     try {
       if (data.sdp) {
         peer = from;
@@ -166,16 +177,30 @@ export function watchBodyCam(
   };
   const onError = (p: { playerId: number; error: string }) => p.playerId === playerId && onState('error', p.error);
 
-  socket.on('cam:signal', onSignal);
-  socket.on('cam:error', onError);
   onState('connecting');
-  socket.emit('cam:watch', { playerId });
+  void iceConfig(app).then((cfg) => {
+    if (closed) return;
+    const conn = new RTCPeerConnection(cfg);
+    pc = conn;
+    conn.ontrack = (e) => {
+      onStream(e.streams[0] ?? new MediaStream([e.track]));
+      onState('live');
+    };
+    conn.onicecandidate = (e) => e.candidate && peer && socket.emit('cam:signal', { to: peer, data: { candidate: e.candidate.toJSON() } });
+    conn.onconnectionstatechange = () => {
+      if (conn.connectionState === 'failed') onState('error', 'НЕТ СОЕДИНЕНИЯ — НУЖЕН TURN');
+      if (conn.connectionState === 'disconnected') onState('offline');
+    };
+    socket.on('cam:signal', onSignal);
+    socket.on('cam:error', onError);
+    socket.emit('cam:watch', { playerId });
+  });
 
   return () => {
     closed = true;
     if (peer) socket.emit('cam:signal', { to: peer, data: { type: 'bye' } });
     socket.off('cam:signal', onSignal);
     socket.off('cam:error', onError);
-    pc.close();
+    pc?.close();
   };
 }

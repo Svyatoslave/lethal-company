@@ -34,6 +34,7 @@ function connect() {
   stop?.();
   stop = watchBodyCam(
     props.socket,
+    'operator',
     props.playerId,
     (s) => {
       // ontrack fires once per track (video, audio) with the same stream: attach it only once.
