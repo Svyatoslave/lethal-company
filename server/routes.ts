@@ -2,6 +2,7 @@ import express, { type Request, type Response } from 'express';
 import * as g from './game.js';
 import { actorFor, join, login, logout } from './auth.js';
 import { playerSnapshot, staffSnapshot } from './snapshot.js';
+import { ICE_TTL_SEC, iceServers, turnConfigured } from './ice.js';
 import type { Role } from '../shared/types.js';
 
 type Handler = (req: Request, actor: g.Actor) => unknown;
@@ -47,6 +48,13 @@ api.post('/auth/logout', (req, res) => send(res, () => logout(bearer(req))));
 api.get('/auth/me', as(ANY, (_req, a) => a));
 api.get('/state', as(ANY, (_req, a) =>
   a.role === 'player' ? playerSnapshot(a.playerId!) : staffSnapshot(a.role as 'admin' | 'operator')));
+
+// body cam connectivity (TURN credentials are short-lived and issued only to signed-in devices)
+api.get('/ice', as(ANY, (_req, a) => ({
+  iceServers: iceServers(a.role === 'player' ? `p${a.playerId}` : a.role),
+  ttlSec: ICE_TTL_SEC,
+  relay: turnConfigured(),
+})));
 
 // missions
 api.post('/missions', as(ADMIN, (req, a) => g.createMission(req.body ?? {}, a)));

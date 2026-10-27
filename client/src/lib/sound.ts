@@ -13,16 +13,31 @@ function audio() {
     ctx = new C();
     ctx.addEventListener('statechange', () => (audioReady.value = ctx?.state === 'running'));
   }
-  if (ctx.state !== 'running') void ctx.resume().then(() => (audioReady.value = ctx?.state === 'running'));
+  // 'suspended' (no gesture yet) and iOS 'interrupted' (call, mic capture, app switch) both need a resume.
+  if (ctx.state !== 'running') void ctx.resume().then(() => (audioReady.value = ctx?.state === 'running')).catch(() => undefined);
   audioReady.value = ctx.state === 'running';
   return ctx;
 }
 
+/*
+ * iOS (Safari 17+) audio session. 'playback' lets signals play through the silent switch, but it cannot
+ * coexist with microphone capture: while the BODY CAM microphone is live the session must be
+ * 'play-and-record', otherwise iOS silences page audio (or the mic). The body cam flips this flag.
+ */
+let micActive = false;
+function applySession() {
+  const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+  if (session) session.type = micActive ? 'play-and-record' : 'playback';
+}
+export function setMicActive(on: boolean) {
+  micActive = on;
+  applySession();
+  audio();
+}
+
 /** Must run inside a user gesture. Also plays a silent buffer, which iOS Safari needs to really unlock output. */
 export function unlockAudio() {
-  // Safari 17+: play through the iPhone silent switch like a media player would.
-  const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
-  if (session) session.type = 'playback';
+  applySession();
   const a = audio();
   if (!a) return;
   const src = a.createBufferSource();
@@ -31,12 +46,15 @@ export function unlockAudio() {
   src.start(0);
 }
 
-// Browsers only allow audio after a user gesture: unlock on the first tap anywhere.
-const unlockOnce = () => {
-  unlockAudio();
-  if (audioReady.value) ['pointerdown', 'touchend', 'click'].forEach((e) => window.removeEventListener(e, unlockOnce));
+// Browsers only allow audio after a user gesture. Audio can also be lost later (mic capture, phone call,
+// screen lock), so every tap re-checks it — cheap when it is already running.
+const ensureAudio = () => {
+  if (!audioReady.value) unlockAudio();
 };
-['pointerdown', 'touchend', 'click'].forEach((e) => window.addEventListener(e, unlockOnce, { passive: true }));
+['pointerdown', 'touchend', 'click'].forEach((e) => window.addEventListener(e, ensureAudio, { passive: true }));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && ctx) audio();
+});
 
 export function toggleMuted() {
   muted.value = !muted.value;

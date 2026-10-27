@@ -1,3 +1,4 @@
+import './env.js';
 import express from 'express';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -11,6 +12,7 @@ import { pins } from './auth.js';
 import { tick } from './game.js';
 import { api } from './routes.js';
 import { attachRealtime } from './realtime.js';
+import { turnConfigured } from './ice.js';
 
 const HTTPS_PORT = Number(arg('port') ?? process.env.PORT ?? 8443);
 const HTTP_PORT = Number(process.env.HTTP_PORT ?? 8080);
@@ -87,5 +89,6 @@ server.listen(HTTPS_PORT, () => {
   console.log(`\n${line}\n  OPERATION: LAST NIGHT — NIGHT RAID  ·  server online\n${line}`);
   for (const host of ['localhost', ...lanAddresses()]) console.log(`  ${proto}://${host}:${HTTPS_PORT}`);
   console.log(`${line}\n  FIELD ADMIN PIN : ${pins.adminPin}\n  OPERATOR PIN    : ${pins.operatorPin}`);
+  console.log(`  BODY CAM RELAY  : ${turnConfigured() ? `TURN ${process.env.TURN_URLS}` : 'not configured (cameras work inside one network)'}`);
   console.log(`  (change in ${path.join(DATA_DIR, 'secrets.json')} or ADMIN_PIN / OPERATOR_PIN env)\n${line}\n`);
 });
