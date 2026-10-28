@@ -44,9 +44,11 @@ export interface Actor { role: Role; playerId: number | null; label: string; pla
 
 export interface TaskRow {
   id: number; mission_id: number; name: string; employee_text: string; operator_text: string;
-  answer: string; reward: number; token: string; status: 'available' | 'active' | 'completed';
+  answer: string; reward: number; token: string; status: 'available' | 'active' | 'completed' | 'locked';
   player_id: number | null; started_at: number | null; completed_at: number | null;
   last_attempt_at: number | null; created_at: number;
+  /** 0 = unlimited. Wrong answers count per terminal; reaching the limit locks it until the admin resets it. */
+  max_attempts: number; attempts: number;
 }
 
 // ---------------------------------------------------------------- infra
@@ -264,9 +266,15 @@ export function createMission(o: MissionOpts, actor: Actor) {
     seedShop(id);
     if (startBalance > 0) addTx(id, startBalance, 'start', 'Стартовый бюджет корпорации', actor.label, `start:${id}`);
     if (o.copyLoot && prev) {
+      // Same QR tokens, fresh state: printed scrap labels and terminal labels keep working in the new mission.
       q.run(
         `INSERT INTO loot (mission_id, code, name, description, value, token, created_at)
          SELECT ?, code, name, description, value, token, ? FROM loot WHERE mission_id = ?`,
+        id, now(), prev.id,
+      );
+      q.run(
+        `INSERT INTO tasks (mission_id, name, employee_text, operator_text, answer, reward, max_attempts, token, created_at)
+         SELECT ?, name, employee_text, operator_text, answer, reward, max_attempts, token, ? FROM tasks WHERE mission_id = ? ORDER BY id`,
         id, now(), prev.id,
       );
     }
@@ -844,7 +852,7 @@ function messageFx(toType: MessageTo, toPlayerId: number | null, from: string, b
 // ---------------------------------------------------------------- cooperative terminals
 
 interface TaskOpts {
-  name?: unknown; employeeText?: unknown; operatorText?: unknown; answer?: unknown; reward?: unknown;
+  name?: unknown; employeeText?: unknown; operatorText?: unknown; answer?: unknown; reward?: unknown; maxAttempts?: unknown;
 }
 
 const normalizeAnswer = (value: string) => value.normalize('NFKC').trim().replace(/\s+/g, ' ').toUpperCase();
@@ -866,12 +874,13 @@ export function saveTask(id: unknown, o: TaskOpts, actor: Actor) {
     const operator = text(o.operatorText, 'Инструкция оператору', 600);
     const answer = normalizeAnswer(text(o.answer, 'Ответ', 80));
     const reward = int(o.reward, 'Награда', 0, 1e6);
+    const maxAttempts = o.maxAttempts === undefined || o.maxAttempts === '' ? 0 : int(o.maxAttempts, 'Лимит попыток', 0, 99);
     if (task) {
-      q.run('UPDATE tasks SET name = ?, employee_text = ?, operator_text = ?, answer = ?, reward = ? WHERE id = ?',
-        name, employee, operator, answer, reward, task.id);
+      q.run('UPDATE tasks SET name = ?, employee_text = ?, operator_text = ?, answer = ?, reward = ?, max_attempts = ? WHERE id = ?',
+        name, employee, operator, answer, reward, maxAttempts, task.id);
     } else {
-      q.run('INSERT INTO tasks (mission_id, name, employee_text, operator_text, answer, reward, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        m.id, name, employee, operator, answer, reward, randomToken(), now());
+      q.run('INSERT INTO tasks (mission_id, name, employee_text, operator_text, answer, reward, max_attempts, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        m.id, name, employee, operator, answer, reward, maxAttempts, randomToken(), now());
     }
     logEvent(m.id, 'TASK', 'info', `Terminal ${task ? 'updated' : 'created'}: ${name}`, 'admin', actor.label);
     return { ok: true };
@@ -896,9 +905,10 @@ export function releaseTask(id: unknown, actor: Actor) {
     const m = mustMission();
     if (m.status === 'ended') fail(409, 'Миссия завершена');
     const task = mustTask(m, id);
-    if (task.status !== 'active') fail(409, 'Терминал не занят');
-    q.run("UPDATE tasks SET status = 'available', player_id = NULL, started_at = NULL, last_attempt_at = NULL WHERE id = ?", task.id);
-    logEvent(m.id, 'TASK', 'warn', `Terminal released: ${task.name}`, 'staff', actor.label);
+    if (task.status !== 'active' && task.status !== 'locked') fail(409, 'Терминал не занят и не заблокирован');
+    // Releasing also clears the wrong-answer counter: the next crew member starts with a full set of attempts.
+    q.run("UPDATE tasks SET status = 'available', player_id = NULL, started_at = NULL, last_attempt_at = NULL, attempts = 0 WHERE id = ?", task.id);
+    logEvent(m.id, 'TASK', 'warn', `Terminal ${task.status === 'locked' ? 'unlocked' : 'released'}: ${task.name}`, 'staff', actor.label);
     return { ok: true };
   });
 }
@@ -912,6 +922,7 @@ export function activateTask(token: unknown, actor: Actor) {
     const task = q.get<TaskRow>('SELECT * FROM tasks WHERE mission_id = ? AND token = ?', m.id, token as string);
     if (!task) fail(404, 'Терминал не найден в текущей миссии');
     if (task!.status === 'completed') fail(409, 'Задание уже выполнено');
+    if (task!.status === 'locked') fail(423, 'ТЕРМИНАЛ ЗАБЛОКИРОВАН: попытки исчерпаны. Разблокировать может только ведущий.');
     if (task!.status === 'active' && task!.player_id !== actor.playerId) fail(409, 'Терминал занят другим сотрудником');
     if (task!.status === 'available') {
       q.run("UPDATE tasks SET status = 'active', player_id = ?, started_at = ? WHERE id = ?", actor.playerId, now(), task!.id);
@@ -930,12 +941,24 @@ export function solveTask(id: unknown, answer: unknown, actor: Actor) {
     const task = mustTask(m, id);
     if (task.player_id !== actor.playerId) fail(403, 'Это задание другого сотрудника');
     if (task.status === 'completed') return { correct: true, already: true };
+    if (task.status === 'locked') fail(423, 'ТЕРМИНАЛ ЗАБЛОКИРОВАН: попытки исчерпаны.');
     if (task.status !== 'active') fail(409, 'Сначала отсканируйте терминал');
     const value = normalizeAnswer(text(answer, 'Ответ', 80));
     const t = now();
     if (task.last_attempt_at && t - task.last_attempt_at < 3000) fail(429, 'Подождите три секунды перед следующей попыткой');
     q.run('UPDATE tasks SET last_attempt_at = ? WHERE id = ?', t, task.id);
-    if (value !== task.answer) return { correct: false, already: false };
+    if (value !== task.answer) {
+      const attempts = task.attempts + 1;
+      const locked = task.max_attempts > 0 && attempts >= task.max_attempts;
+      q.run('UPDATE tasks SET attempts = ?, status = ? WHERE id = ?', attempts, locked ? 'locked' : 'active', task.id);
+      if (locked) {
+        logEvent(m.id, 'TASK', 'crit', `Terminal locked out: ${task.name} — too many wrong codes (${actor.label})`, 'all', actor.label);
+        fx('system:alert', { type: 'task', level: 'crit', title: 'TERMINAL LOCKED', text: `${task.name}: попытки исчерпаны` }, 'staff', { playerId: actor.playerId! });
+      }
+      // Unlimited terminals keep the original reply shape; limited ones also report what is left.
+      if (!task.max_attempts) return { correct: false, already: false };
+      return { correct: false, already: false, locked, attemptsLeft: Math.max(0, task.max_attempts - attempts) };
+    }
     q.run("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?", t, task.id);
     if (task.reward) addTx(m.id, task.reward, 'task', `Терминал: ${task.name}`, actor.label, `task:${task.id}`, `task:${task.id}`);
     logEvent(m.id, 'TASK', 'ok', `Terminal completed: ${task.name} — ${actor.label} (+${task.reward} CR)`, 'all', actor.label);

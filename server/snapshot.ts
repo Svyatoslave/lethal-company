@@ -123,7 +123,8 @@ function tasksView(missionId: number, role: Role, playerId: number | null = null
     missionId, ...(role === 'player' ? [playerId] : []),
   );
   return rows.map((t) => ({
-    id: t.id, name: t.name, status: t.status, reward: t.reward, playerId: t.player_id, callsign: t.callsign,
+    id: t.id, name: t.name, status: t.status, reward: t.reward, maxAttempts: t.max_attempts, attempts: t.attempts,
+    playerId: t.player_id, callsign: t.callsign,
     employeeText: role === 'operator' ? '' : t.employee_text, startedAt: t.started_at, completedAt: t.completed_at,
     ...(role === 'admin' ? { operatorText: t.operator_text, answer: t.answer, token: t.token } :
       role === 'operator' && t.status !== 'available' ? { operatorText: t.operator_text } : {}),

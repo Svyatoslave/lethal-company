@@ -11,13 +11,15 @@ const props = defineProps<{ game: Game; employee?: boolean }>();
 const { state, act, busy } = props.game;
 const tasks = computed(() => state.value?.tasks ?? []);
 const answers = reactive<Record<number, string>>({});
-const labels = { available: 'ОЖИДАНИЕ СКАНА', active: 'НА СВЯЗИ', completed: 'ВЫПОЛНЕНО' };
+const labels = { available: 'ОЖИДАНИЕ СКАНА', active: 'НА СВЯЗИ', completed: 'ВЫПОЛНЕНО', locked: 'ЗАБЛОКИРОВАН' };
+const tones = { available: 'mute', active: 'warn', completed: 'ok', locked: 'crit' } as const;
 
 async function submit(id: number) {
-  const r = await act<{ correct: boolean; already: boolean }>(`task${id}`, 'POST', `/tasks/${id}/answer`, { answer: answers[id] });
+  const r = await act<{ correct: boolean; already: boolean; locked?: boolean; attemptsLeft?: number | null }>(`task${id}`, 'POST', `/tasks/${id}/answer`, { answer: answers[id] });
   if (!r) return;
   if (r.correct) { answers[id] = ''; toast(r.already ? 'Задание уже выполнено' : 'Терминал разблокирован', 'ok'); }
-  else toast('Код не принят. Уточните ответ у оператора.', 'warn');
+  else if (r.locked) toast('Попытки исчерпаны. Терминал заблокирован.', 'crit');
+  else toast(`Код не принят.${r.attemptsLeft != null ? ` Осталось попыток: ${r.attemptsLeft}.` : ''} Уточните ответ у оператора.`, 'warn');
 }
 </script>
 
@@ -28,9 +30,13 @@ async function submit(id: number) {
     <article v-for="t in tasks" :key="t.id" class="task">
       <div class="row wrap">
         <b class="mono grow">{{ t.name }}</b>
-        <TChip :label="labels[t.status]" :tone="t.status === 'completed' ? 'ok' : t.status === 'active' ? 'warn' : 'mute'" />
+        <TChip :label="labels[t.status]" :tone="tones[t.status]" :pulse="t.status === 'locked'" />
       </div>
-      <div class="mono small dim">{{ t.callsign ?? 'ТЕРМИНАЛ СВОБОДЕН' }} · {{ cr(t.reward) }} CR</div>
+      <div class="mono small dim">
+        {{ t.callsign ?? 'ТЕРМИНАЛ СВОБОДЕН' }} · {{ cr(t.reward) }} CR
+        <template v-if="t.maxAttempts"> · ПОПЫТКИ {{ Math.max(0, t.maxAttempts - t.attempts) }}/{{ t.maxAttempts }}</template>
+      </div>
+      <p v-if="t.status === 'locked'" class="locked mono">▲ ТЕРМИНАЛ ЗАБЛОКИРОВАН: ПОПЫТКИ ИСЧЕРПАНЫ. РАЗБЛОКИРОВАТЬ МОЖЕТ ТОЛЬКО ВЕДУЩИЙ.</p>
       <template v-if="t.status !== 'available'">
         <p class="text">{{ employee ? t.employeeText : t.operatorText }}</p>
       </template>
@@ -46,4 +52,5 @@ async function submit(id: number) {
 .note { margin: 0 0 12px; color: var(--text-dim); font-size: 13px; }
 .task { display: flex; flex-direction: column; gap: 10px; padding: 12px 0; border-top: 1px solid var(--line); }
 .text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.locked { margin: 0; color: var(--red); font-size: 12px; letter-spacing: 0.06em; }
 </style>
