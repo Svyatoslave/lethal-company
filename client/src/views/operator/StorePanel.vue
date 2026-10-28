@@ -25,6 +25,7 @@ function blocker(i: ShopItemView): string | null {
   if (i.maxPurchases && i.bought >= i.maxPurchases) return i.key === 'radio' ? 'УСТАНОВЛЕНО' : 'ЛИМИТ';
   if (i.key === 'radio' && m.value.commsRadio) return 'УСТАНОВЛЕНО';
   if (i.key === 'bodycam' && m.value.camsUnlocked) return 'УСТАНОВЛЕНО';
+  if (i.key === 'radar' && m.value.scrapRadar) return 'УСТАНОВЛЕНО';
   if (balance.value < i.price) return 'НЕТ CR';
   if (i.key === 'medkit' && !target[i.id]) return injured.value.length ? 'ВЫБЕРИТЕ' : 'ВСЕ ЗДОРОВЫ';
   return null;

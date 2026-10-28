@@ -68,7 +68,7 @@ const hint = computed(() => {
       <div class="stats">
         <div class="stat"><span class="label">OUTSIDE</span><b :class="{ amber: outside }">{{ outside }}</b></div>
         <div class="stat"><span class="label">AT BASE</span><b>{{ atBase }}</b></div>
-        <div class="stat"><span class="label">FOUND</span><b>{{ state?.lootStats.found ?? 0 }}<small>/{{ state?.lootStats.total ?? 0 }}</small></b></div>
+        <div class="stat"><span class="label">FOUND</span><b>{{ state?.lootStats.found ?? 0 }}<small>/{{ state?.lootStats.total ?? '?' }}</small></b></div>
         <div class="stat"><span class="label">EXTRACTED</span><b class="acc">{{ state?.lootStats.extracted ?? 0 }}</b></div>
       </div>
       <div v-if="overdue" class="overdue mono">▲ OVERDUE: {{ overdue }} — СОТРУДНИК НЕ ВЕРНУЛСЯ ВОВРЕМЯ</div>

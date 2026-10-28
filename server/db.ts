@@ -215,6 +215,10 @@ const missionCols = db.prepare('PRAGMA table_info(missions)').all() as { name: s
 if (!missionCols.some((c) => c.name === 'cams_unlocked')) {
   db.exec('ALTER TABLE missions ADD COLUMN cams_unlocked INTEGER NOT NULL DEFAULT 0');
 }
+// SCRAP RADAR upgrade: until bought, nobody but the admin sees scrap that has not been scanned yet.
+if (!missionCols.some((c) => c.name === 'scrap_radar')) {
+  db.exec('ALTER TABLE missions ADD COLUMN scrap_radar INTEGER NOT NULL DEFAULT 0');
+}
 // Health replaced credit penalties: lateness and monster hits take a percentage of HP.
 if (!missionCols.some((c) => c.name === 'overdue_damage')) {
   db.exec('ALTER TABLE missions ADD COLUMN overdue_damage INTEGER NOT NULL DEFAULT 50');

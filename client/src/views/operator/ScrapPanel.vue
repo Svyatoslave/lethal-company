@@ -27,12 +27,12 @@ const rows = computed(() => {
     .filter((l) => !s || l.code.includes(s) || l.name.toUpperCase().includes(s))
     .sort((a, b) => rank[a.status] - rank[b.status] || (b.foundAt ?? 0) - (a.foundAt ?? 0) || a.code.localeCompare(b.code));
 });
-const tabs = [
-  ['all', 'ALL'],
-  ['found', 'FOUND'],
-  ['available', 'AVAILABLE'],
-  ['extracted', 'EXTRACTED'],
-] as const;
+// Without SCRAP RADAR the server only sends scanned scrap, so the AVAILABLE tab would always be empty.
+const radar = computed(() => !!state.value?.mission?.scrapRadar);
+const tabs = computed(() =>
+  ([['all', 'ALL'], ['found', 'FOUND'], ['available', 'AVAILABLE'], ['extracted', 'EXTRACTED']] as const)
+    .filter(([k]) => radar.value || k !== 'available'),
+);
 </script>
 
 <template>
@@ -45,8 +45,11 @@ const tabs = [
         {{ l }} <span>{{ counts[k] }}</span>
       </button>
     </div>
+    <div v-if="!radar" class="noradar mono">
+      ◌ РАДАР НЕ УСТАНОВЛЕН — ВИДНЫ ТОЛЬКО ОТСКАНИРОВАННЫЕ ПРЕДМЕТЫ. ЗАСЧИТАТЬ МОЖНО ТОЛЬКО ПО QR-МЕТКЕ.
+    </div>
     <div class="list">
-      <div v-if="!rows.length" class="empty">// {{ loot.length ? 'НЕТ СОВПАДЕНИЙ' : 'ПРЕДМЕТЫ МИССИИ НЕ ЗАРЕГИСТРИРОВАНЫ' }}</div>
+      <div v-if="!rows.length" class="empty">// {{ loot.length ? 'НЕТ СОВПАДЕНИЙ' : radar ? 'ПРЕДМЕТЫ МИССИИ НЕ ЗАРЕГИСТРИРОВАНЫ' : 'НИЧЕГО НЕ ОТСКАНИРОВАНО. ПРИНЕСИТЕ ЛУТ НА БАЗУ.' }}</div>
       <div v-for="l in rows" :key="l.id" class="item" :class="l.status">
         <span class="code mono">{{ l.code }}</span>
         <span class="name" :title="l.description || undefined">
@@ -64,10 +67,7 @@ const tabs = [
             v-if="l.status === 'found'" size="sm" variant="solid" confirm="НА БАЗЕ?"
             :busy="busy.has(`ex${l.id}`)" @click="act(`ex${l.id}`, 'POST', `/loot/${l.id}/extract`)"
           >EXTRACT</TButton>
-          <TButton
-            v-else-if="l.status === 'available'" size="sm" variant="ghost" confirm="БЕЗ СКАНА?"
-            :busy="busy.has(`ex${l.id}`)" @click="act(`ex${l.id}`, 'POST', `/loot/${l.id}/extract`)"
-          >EXTRACT</TButton>
+          <span v-else-if="l.status === 'available'" class="mute mono small">ЖДЁТ QR</span>
           <span v-else class="ok mono">✓ {{ clock(l.extractedAt, false) }}</span>
         </span>
       </div>
@@ -76,6 +76,17 @@ const tabs = [
 </template>
 
 <style scoped>
+.noradar {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--amber);
+  background: var(--amber-dim);
+}
+.small {
+  font-size: 10.5px;
+}
 .search {
   min-height: 28px;
   height: 28px;
