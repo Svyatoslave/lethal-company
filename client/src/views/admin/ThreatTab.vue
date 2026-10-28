@@ -22,6 +22,9 @@ const rage = computed(() => (m.value?.monsterDamage ?? 0) >= 100);
 const customDamage = ref(50);
 watch(() => m.value?.monsterDamage, (d) => d !== undefined && (customDamage.value = d), { immediate: true });
 const setDamage = (d: number, ok: string) => act('dmg', 'PATCH', '/missions/current', { monsterDamage: d }, ok);
+const infectionHits = ref(1);
+watch(() => m.value?.infectionHitsRequired, (n) => n !== undefined && (infectionHits.value = n), { immediate: true });
+const setInfectionHits = () => act('ihits', 'PATCH', '/missions/current', { infectionHitsRequired: infectionHits.value }, `Контактов до заражения: ${infectionHits.value}`);
 
 // ---- overdue damage (same idea: a % of HP, announced to everyone when changed)
 const customOverdue = ref(50);
@@ -98,6 +101,14 @@ const KIND: Record<string, string> = { hit: 'УДАР', overdue: 'ОПОЗДАН
       <TButton variant="ghost" :busy="busy.has('dmg')" @click="setDamage(customDamage, `Урон монстров: ${customDamage}%`)">ЗАДАТЬ %</TButton>
     </div>
     <p class="a-note top">Любое изменение урона объявляется всем устройствам. Ярость — для финала игры: один удар забирает всё здоровье.</p>
+  </TPanel>
+
+  <TPanel v-if="m?.infectionMode" title="ПОРОГ ЗАРАЖЕНИЯ" code="T-0H">
+    <div class="row">
+      <input v-model.number="infectionHits" class="input grow" type="number" min="1" max="20" />
+      <TButton :busy="busy.has('ihits')" @click="setInfectionHits">СОХРАНИТЬ</TButton>
+    </div>
+    <p class="a-note top">Сколько подтверждённых касаний нужно одной цели до заражения. Уже нанесённые контакты сохраняются.</p>
   </TPanel>
 
   <TPanel v-if="m?.infectionMode" title="ЗАРАЖЁННЫЕ" code="T-0I" tone="crit">

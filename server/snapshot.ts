@@ -13,7 +13,8 @@ import type {
 function missionView(m: MissionRow): MissionView {
   return {
     id: m.id, code: m.code, name: m.name, status: m.status as MissionView['status'], quota: m.quota,
-    startBalance: m.start_balance, durationSec: m.duration_sec, overdueDamage: m.overdue_damage, monsterDamage: m.monster_damage, infectionMode: !!m.infection_mode, crewSize: m.crew_size,
+    startBalance: m.start_balance, durationSec: m.duration_sec, overdueDamage: m.overdue_damage, monsterDamage: m.monster_damage,
+    infectionMode: !!m.infection_mode, infectionHitsRequired: m.infection_hits_required, crewSize: m.crew_size,
     gate: m.gate as MissionView['gate'], threatLevel: m.threat_level, commsRadio: !!m.comms_radio,
     commsDisabled: !!m.comms_disabled, camsUnlocked: !!m.cams_unlocked, scrapRadar: !!m.scrap_radar, messageDelaySec: m.message_delay_sec, timeBonusSec: m.time_bonus_sec,
     pauseReason: m.pause_reason, startedAt: m.started_at, pausedAt: m.paused_at, pausedTotalMs: m.paused_total_ms,

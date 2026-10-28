@@ -102,10 +102,14 @@ const fieldCrew = computed(() => state.value?.players.filter((p) => p.role === '
 const targets = computed(() => fieldCrew.value.filter((p) => p.id !== me.value?.playerId && !p.infected && ['OUTSIDE', 'RETURNING', 'OVERDUE'].includes(p.status)));
 const rage = computed(() => (m.value?.monsterDamage ?? 0) >= 100);
 async function hit(playerId: number) {
-  const r = await act<{ hp: number; duplicate: boolean; infected: boolean }>(`hit${playerId}`, 'POST', '/monster/hit', { targetPlayerId: playerId, requestId: requestId() });
+  const r = await act<{ hp: number; duplicate: boolean; infected: boolean; hits?: number; hitsRequired?: number }>(`hit${playerId}`, 'POST', '/monster/hit', { targetPlayerId: playerId, requestId: requestId() });
   if (r) {
     vibrate(200);
-    toast(r.infected ? 'Контакт подтверждён. Связь с целью потеряна.' : `Удар засчитан. Здоровье цели: ${r.hp}%`, 'warn');
+    toast(r.infected
+      ? 'Контакт подтверждён. Связь с целью потеряна.'
+      : m.value?.infectionMode
+        ? `Контакт подтверждён: ${r.hits ?? 0}/${r.hitsRequired ?? m.value.infectionHitsRequired}`
+        : `Удар засчитан. Здоровье цели: ${r.hp}%`, 'warn');
   }
 }
 

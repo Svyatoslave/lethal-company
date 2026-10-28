@@ -28,6 +28,8 @@ export interface MissionView {
   monsterDamage: number;
   /** Monster hits spread infection instead of dealing damage. */
   infectionMode: boolean;
+  /** Confirmed contacts required before a crew member becomes infected. */
+  infectionHitsRequired: number;
   crewSize: number;
   gate: GateStatus;
   threatLevel: number;
