@@ -26,6 +26,8 @@ export interface MissionView {
   overdueDamage: number;
   /** HP percent lost per monster hit (100 = "rage": one hit is lethal). */
   monsterDamage: number;
+  /** Monster hits spread infection instead of dealing damage. */
+  infectionMode: boolean;
   crewSize: number;
   gate: GateStatus;
   threatLevel: number;
@@ -78,6 +80,10 @@ export interface PlayerView {
   online: boolean;
   /** The player's phone is publishing a body cam stream right now. */
   camOn: boolean;
+  /** Only exposed to the infected player and admin. */
+  infected: boolean;
+  /** Operator-safe projection of infection: the real reason stays hidden. */
+  linkLost: boolean;
   exitAt: number | null;
   deadlineAt: number | null;
 }

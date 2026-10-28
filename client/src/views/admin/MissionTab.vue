@@ -9,8 +9,8 @@ const props = defineProps<{ game: Game }>();
 const { state, now, act, busy } = props.game;
 const m = computed(() => state.value?.mission ?? null);
 
-const draft = reactive({ name: 'NIGHT RAID', quota: 1000, startBalance: 300, durationMin: 15, overdueDamage: 50, monsterDamage: 50, crewSize: 4, copyLoot: true });
-const settings = reactive({ name: '', quota: 0, durationMin: 0, overdueDamage: 50, crewSize: 4 });
+const draft = reactive({ name: 'NIGHT RAID', quota: 1000, startBalance: 300, durationMin: 15, overdueDamage: 50, monsterDamage: 50, infectionMode: false, crewSize: 4, copyLoot: true });
+const settings = reactive({ name: '', quota: 0, durationMin: 0, overdueDamage: 50, infectionMode: false, crewSize: 4 });
 const showNew = ref(false);
 
 watch(
@@ -21,6 +21,7 @@ watch(
     settings.quota = v.quota;
     settings.durationMin = Math.round((v.durationSec / 60) * 10) / 10;
     settings.overdueDamage = v.overdueDamage;
+    settings.infectionMode = v.infectionMode;
     settings.crewSize = v.crewSize;
   },
   { immediate: true },
@@ -34,6 +35,7 @@ async function create() {
     durationSec: Math.round(draft.durationMin * 60),
     overdueDamage: draft.overdueDamage,
     monsterDamage: draft.monsterDamage,
+    infectionMode: draft.infectionMode,
     crewSize: draft.crewSize,
     copyLoot: draft.copyLoot,
   }, 'Миссия создана');
@@ -45,6 +47,7 @@ function save() {
     quota: settings.quota,
     durationSec: Math.round(settings.durationMin * 60),
     overdueDamage: settings.overdueDamage,
+    infectionMode: settings.infectionMode,
     crewSize: settings.crewSize,
   }, 'Настройки сохранены');
 }
@@ -69,6 +72,7 @@ function save() {
         <RouterLink to="/print" class="lnk mono" target="_blank">▤ ПЕЧАТЬ QR</RouterLink>
         <RouterLink to="/operator" class="lnk mono" target="_blank">▣ ТЕРМИНАЛ</RouterLink>
       </div>
+      <label class="check"><input v-model="settings.infectionMode" type="checkbox" /> РЕЖИМ ЗАРАЖЕНИЯ — удар заражает вместо снятия HP</label>
     </div>
   </TPanel>
 
@@ -98,6 +102,7 @@ function save() {
         <label class="field"><span class="label">Удар монстра, −% HP</span><input v-model.number="draft.monsterDamage" class="input" type="number" min="0" max="100" /></label>
         <label class="field"><span class="label">Размер группы</span><input v-model.number="draft.crewSize" class="input" type="number" min="1" max="12" /></label>
       </div>
+      <label class="check"><input v-model="draft.infectionMode" type="checkbox" /> РЕЖИМ ЗАРАЖЕНИЯ — заражённые распространяют инфекцию</label>
       <label v-if="m" class="check"><input v-model="draft.copyLoot" type="checkbox" /> Перенести предметы и задания-терминалы (те же QR-метки)</label>
       <TButton variant="solid" size="lg" block :busy="busy.has('create')" @click="create">СОЗДАТЬ МИССИЮ</TButton>
     </form>

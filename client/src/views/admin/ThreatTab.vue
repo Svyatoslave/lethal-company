@@ -87,6 +87,7 @@ const KIND: Record<string, string> = { hit: 'УДАР', overdue: 'ОПОЗДАН
   </TPanel>
 
   <TPanel title="УРОН МОНСТРОВ" code="T-00" :tone="rage ? 'crit' : undefined">
+    <div v-if="m?.infectionMode" class="a-note a-warn">РЕЖИМ ЗАРАЖЕНИЯ: удар не снимает HP. Цель теряет связь с оператором и может заражать других.</div>
     <div class="dmg mono" :class="{ rage }">{{ m?.monsterDamage ?? 0 }}% <small>HP ЗА УДАР</small></div>
     <div class="a-grid2">
       <TButton :variant="!rage ? 'solid' : 'ghost'" size="lg" :disabled="!m || m.monsterDamage === 50" :busy="busy.has('dmg')" @click="setDamage(50, 'Урон монстров: 50%')">ОБЫЧНЫЙ 50%</TButton>
@@ -97,6 +98,13 @@ const KIND: Record<string, string> = { hit: 'УДАР', overdue: 'ОПОЗДАН
       <TButton variant="ghost" :busy="busy.has('dmg')" @click="setDamage(customDamage, `Урон монстров: ${customDamage}%`)">ЗАДАТЬ %</TButton>
     </div>
     <p class="a-note top">Любое изменение урона объявляется всем устройствам. Ярость — для финала игры: один удар забирает всё здоровье.</p>
+  </TPanel>
+
+  <TPanel v-if="m?.infectionMode" title="ЗАРАЖЁННЫЕ" code="T-0I" tone="crit">
+    <div v-if="!crew.some((p) => p.infected)" class="empty">// ЗАРАЖЕНИЕ НЕ ОБНАРУЖЕНО</div>
+    <div v-for="p in crew.filter((x) => x.infected)" :key="p.id" class="ma mono">
+      <b class="red">INFECTED</b><span>{{ p.callsign }}</span><span class="dim">{{ p.status }}</span>
+    </div>
   </TPanel>
 
   <TPanel title="УРОН ЗА ОПОЗДАНИЕ" code="T-0B" :tone="(m?.overdueDamage ?? 0) >= 100 ? 'crit' : undefined">

@@ -74,6 +74,7 @@ async function form() {
             <td class="cs">
               <span class="dot" :class="{ on: p.online }" :title="p.online ? 'device online' : 'device offline'" />
               {{ p.callsign }}
+              <span v-if="p.linkLost" class="lost mono">SIGNAL LOST</span>
               <button v-if="p.camOn" type="button" class="cam mono" title="Смотреть BODY CAM" @click.stop="emit('watch', p.id)">◉ CAM</button>
             </td>
             <td><TChip :label="CREW_LABEL[p.status]" :tone="CREW_TONE[p.status]" :pulse="p.status === 'OVERDUE'" /></td>
@@ -87,7 +88,7 @@ async function form() {
             </td>
             <td class="act" @click.stop>
               <TButton
-                v-if="['OUTSIDE', 'RETURNING', 'OVERDUE'].includes(p.status)"
+                v-if="!p.linkLost && ['OUTSIDE', 'RETURNING', 'OVERDUE'].includes(p.status)"
                 size="sm" :variant="p.status === 'OVERDUE' ? 'danger' : 'solid'" confirm="НА БАЗЕ?"
                 :busy="busy.has(`ret${p.id}`)"
                 @click="act(`ret${p.id}`, 'POST', '/expeditions/current/return', { playerId: p.id })"
@@ -116,6 +117,7 @@ async function form() {
   font-size: 10.5px;
   letter-spacing: 0.1em;
 }
+.lost { color: var(--red); font-size: 10px; margin-left: 6px; animation: blink 1.2s steps(2) infinite; }
 .wrap {
   overflow-x: auto;
 }
