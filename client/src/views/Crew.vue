@@ -74,7 +74,7 @@ const scan = ref<{ ok: boolean; title: string; data?: ClaimResult; error?: strin
 const me = computed(() => state.value?.me ?? null);
 const m = computed(() => state.value?.mission ?? null);
 const myRow = computed(() => state.value?.players.find((p) => p.id === me.value?.playerId) ?? null);
-const infected = computed(() => !!myRow.value?.infected);
+const infected = computed(() => me.value?.role === 'crew' && !!myRow.value?.infected);
 const threat = computed(() => me.value?.role === 'monster' || infected.value);
 const status = computed(() => myRow.value?.status ?? 'AT_BASE');
 const exp = computed(() => state.value?.expedition ?? null);

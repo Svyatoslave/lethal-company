@@ -787,7 +787,7 @@ export function monsterHit(o: { targetPlayerId?: unknown; requestId?: unknown },
   return mutate(() => {
     const m = mustMission();
     requireRunning(m);
-    const infectedAttacker = actor.role === 'player' && actor.playerId !== null && isInfected(m.id, actor.playerId);
+    const infectedAttacker = actor.role === 'player' && actor.playerRole !== 'monster' && actor.playerId !== null && isInfected(m.id, actor.playerId);
     if (actor.role !== 'player' || (actor.playerRole !== 'monster' && !infectedAttacker)) fail(403, 'Отмечать удары может только монстр или заражённый');
     if (infectedAttacker && !inField(m, actor.playerId!)) fail(409, 'Атаковать можно только за шлюзом');
     if (typeof o.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(o.requestId)) fail(400, 'Нет идентификатора запроса');
