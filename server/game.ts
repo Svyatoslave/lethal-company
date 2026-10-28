@@ -243,7 +243,7 @@ for (const { id } of q.all<{ id: number }>("SELECT id FROM missions WHERE status
 
 export interface MissionOpts {
   name?: unknown; quota?: unknown; startBalance?: unknown; durationSec?: unknown;
-  overdueDamage?: unknown; monsterDamage?: unknown; infectionMode?: unknown; infectionHitsRequired?: unknown; crewSize?: unknown; copyLoot?: unknown;
+  overdueDamage?: unknown; monsterDamage?: unknown; crewSize?: unknown; copyLoot?: unknown;
 }
 
 export function createMission(o: MissionOpts, actor: Actor) {
@@ -259,15 +259,13 @@ export function createMission(o: MissionOpts, actor: Actor) {
     const duration = o.durationSec === undefined ? 900 : int(o.durationSec, 'Длительность', 30, 6 * 3600);
     const overdueDamage = o.overdueDamage === undefined ? 50 : int(o.overdueDamage, 'Урон за опоздание', 0, 100);
     const monsterDamage = o.monsterDamage === undefined ? 50 : int(o.monsterDamage, 'Урон монстра', 0, 100);
-    const infectionMode = o.infectionMode ? 1 : 0;
-    const infectionHitsRequired = o.infectionHitsRequired === undefined ? 1 : int(o.infectionHitsRequired, 'Удары до заражения', 1, 20);
     const crewSize = o.crewSize === undefined ? 4 : int(o.crewSize, 'Размер группы', 1, 12);
     const code = `LN-${crypto.randomInt(1000, 10000)}`;
     // overdue_penalty (credits) is legacy: lateness now costs HP, so it is stored as 0.
     const id = q.run(
       `INSERT INTO missions (code, name, quota, start_balance, duration_sec, overdue_penalty, overdue_damage, monster_damage, infection_mode, infection_hits_required, crew_size, created_at)
        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
-      code, name, quota, startBalance, duration, overdueDamage, monsterDamage, infectionMode, infectionHitsRequired, crewSize, now(),
+      code, name, quota, startBalance, duration, overdueDamage, monsterDamage, 0, 1, crewSize, now(),
     ).id;
     seedShop(id);
     if (startBalance > 0) addTx(id, startBalance, 'start', 'Стартовый бюджет корпорации', actor.label, `start:${id}`);
@@ -640,14 +638,39 @@ function maybeCompleteExpedition(m: MissionRow, expeditionId: number, actor: Act
   const exp = q.get<ExpeditionRow>('SELECT * FROM expeditions WHERE id = ?', expeditionId)!;
   if (exp.status !== 'active') return;
   const out = q.get<{ c: number }>(
-    "SELECT COUNT(*) AS c FROM expedition_players WHERE expedition_id = ? AND status IN ('outside','returning','overdue')", exp.id,
+    `SELECT COUNT(*) AS c FROM expedition_players ep
+     WHERE ep.expedition_id = ? AND ep.status IN ('outside','returning','overdue')
+       AND NOT EXISTS (SELECT 1 FROM infections i WHERE i.mission_id = ? AND i.player_id = ep.player_id)`,
+    exp.id, m.id,
   )!.c;
   const exited = q.get<{ c: number }>('SELECT COUNT(*) AS c FROM expedition_players WHERE expedition_id = ? AND exit_at IS NOT NULL', exp.id)!.c;
   if (out > 0 || exited === 0) return;
   q.run("DELETE FROM expedition_players WHERE expedition_id = ? AND status = 'ready'", exp.id);
   q.run("UPDATE expeditions SET status = 'completed', completed_at = ? WHERE id = ?", now(), exp.id);
-  logEvent(m.id, 'SYSTEM', 'ok', `Expedition #${exp.number} complete. All personnel accounted for.`, 'all', actor.label);
-  fx('mission:updated', { type: 'expedition', level: 'ok', title: `EXPEDITION #${exp.number} COMPLETE`, text: 'Весь экипаж на базе' });
+  const promoted = q.all<{ callsign: string }>(
+    `SELECT p.callsign FROM players p JOIN infections i ON i.player_id = p.id
+     JOIN expedition_players ep ON ep.player_id = p.id
+     WHERE i.mission_id = ? AND ep.expedition_id = ? AND p.role = 'crew'`,
+    m.id, exp.id,
+  );
+  q.run(
+    `UPDATE players SET role = 'monster' WHERE role = 'crew' AND id IN (
+       SELECT i.player_id FROM infections i JOIN expedition_players ep ON ep.player_id = i.player_id
+       WHERE i.mission_id = ? AND ep.expedition_id = ?
+     )`,
+    m.id, exp.id,
+  );
+  const losses = promoted.length;
+  logEvent(m.id, losses ? 'THREAT' : 'SYSTEM', losses ? 'crit' : 'ok',
+    losses
+      ? `Expedition #${exp.number} complete. Lost personnel converted: ${promoted.map((p) => p.callsign).join(', ')}.`
+      : `Expedition #${exp.number} complete. All personnel accounted for.`,
+    'staff', actor.label);
+  fx('mission:updated', {
+    type: losses ? 'expedition-infected' : 'expedition', level: losses ? 'crit' : 'ok',
+    title: losses ? `EXPEDITION #${exp.number} LOST` : `EXPEDITION #${exp.number} COMPLETE`,
+    text: losses ? 'Заражённые сотрудники перешли на сторону угрозы' : 'Весь экипаж на базе',
+  });
 }
 
 export function confirmReturn(playerId: unknown, actor: Actor) {
@@ -759,23 +782,6 @@ const inField = (m: MissionRow, playerId: number) =>
 const lastHit = new Map<string, number>();
 const HIT_COOLDOWN_MS = 10_000;
 
-function completeIfAllInfected(m: MissionRow, actor: Actor) {
-  const exp = currentExpedition(m.id);
-  if (!exp || exp.status !== 'active') return;
-  const roster = q.get<{ total: number; infected: number }>(
-    `SELECT COUNT(*) AS total,
-       SUM(CASE WHEN i.player_id IS NOT NULL THEN 1 ELSE 0 END) AS infected
-     FROM expedition_players ep
-     LEFT JOIN infections i ON i.mission_id = ? AND i.player_id = ep.player_id
-     WHERE ep.expedition_id = ? AND ep.exit_at IS NOT NULL`,
-    m.id, exp.id,
-  )!;
-  if (!roster.total || roster.infected !== roster.total) return;
-  q.run("UPDATE expeditions SET status = 'completed', completed_at = ? WHERE id = ? AND status = 'active'", now(), exp.id);
-  logEvent(m.id, 'THREAT', 'crit', `Expedition #${exp.number} lost. No crew signals remain.`, 'staff', actor.label);
-  fx('mission:updated', { type: 'expedition-infected', level: 'crit', title: `EXPEDITION #${exp.number} LOST`, text: 'Связь со всей группой потеряна' }, 'staff');
-}
-
 /** A monster reports that it touched/tagged a crew member. Damage is the mission's monster_damage percent. */
 export function monsterHit(o: { targetPlayerId?: unknown; requestId?: unknown }, actor: Actor) {
   return mutate(() => {
@@ -815,7 +821,8 @@ export function monsterHit(o: { targetPlayerId?: unknown; requestId?: unknown },
       fx('monster:event', { type: 'infected', level: 'crit', title: 'СВЯЗЬ ПОТЕРЯНА', text: 'Вы заражены. Теперь вы можете заражать других сотрудников.', targetPlayerId: target.id }, { playerId: target.id });
       fx('monster:event', { type: 'signal-lost', level: 'crit', title: `${target.callsign}: SIGNAL LOST` }, 'operator');
       fx('monster:event', { type: 'infected', level: 'crit', title: `${target.callsign} ЗАРАЖЁН`, text: `Источник: ${actor.label}` }, 'admin');
-      completeIfAllInfected(m, actor);
+      const exp = currentExpedition(m.id);
+      if (exp) maybeCompleteExpedition(m, exp.id, actor);
       return { duplicate: false, hp: hpOf(m.id, target.id), infected: true, hits, hitsRequired: m.infection_hits_required };
     }
     if (hpOf(m.id, target.id) <= 0) fail(409, `${target.callsign} уже выведен из строя`);

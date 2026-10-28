@@ -27,7 +27,13 @@ export function scheduleBroadcast() {
     timer = null;
     const cache = new Map<string, Snapshot>();
     for (const socket of io!.of('/').sockets.values()) {
-      const actor = socket.data.actor as Actor;
+      const actor = actorFor(socket.handshake.auth?.token) ?? socket.data.actor as Actor;
+      const previous = socket.data.actor as Actor;
+      socket.data.actor = actor;
+      if (actor.role === 'player' && actor.playerRole !== previous.playerRole) {
+        void socket.leave(actor.playerRole === 'monster' ? 'crew' : 'monsters');
+        void socket.join(actor.playerRole === 'monster' ? 'monsters' : 'crew');
+      }
       socket.emit('state', snapshotFor(actor, cache));
     }
   }, 40);
