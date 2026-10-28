@@ -15,7 +15,7 @@ function missionView(m: MissionRow): MissionView {
     id: m.id, code: m.code, name: m.name, status: m.status as MissionView['status'], quota: m.quota,
     startBalance: m.start_balance, durationSec: m.duration_sec, overdueDamage: m.overdue_damage, monsterDamage: m.monster_damage, crewSize: m.crew_size,
     gate: m.gate as MissionView['gate'], threatLevel: m.threat_level, commsRadio: !!m.comms_radio,
-    commsDisabled: !!m.comms_disabled, camsUnlocked: !!m.cams_unlocked, messageDelaySec: m.message_delay_sec, timeBonusSec: m.time_bonus_sec,
+    commsDisabled: !!m.comms_disabled, camsUnlocked: !!m.cams_unlocked, scrapRadar: !!m.scrap_radar, messageDelaySec: m.message_delay_sec, timeBonusSec: m.time_bonus_sec,
     pauseReason: m.pause_reason, startedAt: m.started_at, pausedAt: m.paused_at, pausedTotalMs: m.paused_total_ms,
     endedAt: m.ended_at,
   };
@@ -134,17 +134,20 @@ function emptySnapshot(role: Role, t: number): Snapshot {
   return {
     serverNow: t, role, me: null, mission: null, raidActive: false, balance: 0, quotaProgress: 0, lootStats: { total: 0, found: 0, extracted: 0 },
     expedition: null, players: [], health: [], loot: [], transactions: [], shop: [], purchases: [], messages: [],
-    events: [], monsterActions: [], tasks: [],
+    events: [], monsterActions: [], tasks: [], manifest: [],
   };
 }
 
-function lootStats(missionId: number) {
+/** `total` is withheld (null) unless the viewer may know how much scrap exists: admin, or after SCRAP RADAR. */
+function lootStats(missionId: number, revealTotal: boolean) {
   const r = q.get<{ total: number; found: number; extracted: number }>(
     `SELECT COUNT(*) AS total, SUM(status = 'found') AS found, SUM(status = 'extracted') AS extracted FROM loot WHERE mission_id = ?`,
     missionId,
   )!;
-  return { total: r.total, found: (r.found ?? 0) + (r.extracted ?? 0), extracted: r.extracted ?? 0 };
+  return { total: revealTotal ? r.total : null, found: (r.found ?? 0) + (r.extracted ?? 0), extracted: r.extracted ?? 0 };
 }
+
+const ALL_LOOT = 'SELECT l.*, p.callsign FROM loot l LEFT JOIN players p ON p.id = l.found_by WHERE l.mission_id = ? ORDER BY l.code';
 
 export function staffSnapshot(role: 'admin' | 'operator'): Snapshot {
   const t = Date.now();
@@ -159,13 +162,15 @@ export function staffSnapshot(role: 'admin' | 'operator'): Snapshot {
   s.tasks = tasksView(m.id, role);
   s.balance = balanceOf(m.id);
   s.quotaProgress = quotaProgressOf(m.id);
-  s.lootStats = lootStats(m.id);
+  // Without SCRAP RADAR the operator sees only scrap that a crew member has already scanned.
+  const seeAll = isAdmin || !!m.scrap_radar;
+  s.lootStats = lootStats(m.id, seeAll);
   s.expedition = exp ? expeditionView(exp) : null;
   s.players = playersView(m, s.expedition, isAdmin);
   s.health = healthView(m.id, '1 = 1', [], 200);
-  s.loot = q.all<LootRow & { callsign: string | null }>(
-    'SELECT l.*, p.callsign FROM loot l LEFT JOIN players p ON p.id = l.found_by WHERE l.mission_id = ? ORDER BY l.code', m.id,
-  ).map(lootView);
+  s.loot = q.all<LootRow & { callsign: string | null }>(ALL_LOOT, m.id)
+    .filter((l) => seeAll || l.status !== 'available')
+    .map(lootView);
   s.transactions = q.all<TxRow>(`SELECT * FROM transactions WHERE mission_id = ? ORDER BY id DESC LIMIT ${isAdmin ? 300 : 60}`, m.id)
     .map((x): TxView => ({ id: x.id, amount: x.amount, kind: x.kind, description: x.description, actor: x.actor, createdAt: x.created_at, reversesId: x.reverses_id, reversedById: x.reversed_by_id }));
   const bought = new Map(q.all<{ item_id: number; c: number }>('SELECT item_id, COUNT(*) AS c FROM purchases WHERE mission_id = ? GROUP BY item_id', m.id).map((r) => [r.item_id, r.c]));
@@ -206,7 +211,9 @@ export function playerSnapshot(playerId: number): Snapshot {
   s.tasks = p.role === 'crew' ? tasksView(m.id, 'player', p.id) : [];
   s.balance = balanceOf(m.id);
   s.quotaProgress = quotaProgressOf(m.id);
-  s.lootStats = lootStats(m.id);
+  s.lootStats = lootStats(m.id, !!m.scrap_radar);
+  // SCRAP RADAR shows crew the whole object manifest (names, value and status; there is no map, so no locations).
+  s.manifest = p.role === 'crew' && m.scrap_radar ? q.all<LootRow & { callsign: string | null }>(ALL_LOOT, m.id).map(lootView) : [];
   const exp = latestExpedition(m.id);
   const ev = exp ? expeditionView(exp) : null;
   // Crew see their own expedition only; monsters see the field roster to know who is out.

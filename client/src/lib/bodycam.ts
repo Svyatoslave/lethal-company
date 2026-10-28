@@ -38,6 +38,9 @@ export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>, app: A
   const error = ref('');
   const starting = ref(false);
   const hasAudio = ref(false);
+  /** The rear camera's flash can act as a flashlight while streaming (Android Chrome; not exposed on iPhone). */
+  const torchAvailable = ref(false);
+  const torchOn = ref(false);
   const peers = new Map<string, RTCPeerConnection>();
 
   function dropPeer(id: string) {
@@ -116,6 +119,9 @@ export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>, app: A
         stream.value = await navigator.mediaDevices.getUserMedia({ video, audio: false });
       }
       hasAudio.value = stream.value.getAudioTracks().length > 0;
+      const caps = stream.value.getVideoTracks()[0]?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
+      torchAvailable.value = !!caps?.torch;
+      torchOn.value = false;
       setMicActive(hasAudio.value);
       // Still inside the tap's activation window: bring signal audio back if capture interrupted it.
       unlockAudio();
@@ -137,8 +143,23 @@ export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>, app: A
     stream.value?.getTracks().forEach((t) => t.stop());
     stream.value = null;
     hasAudio.value = false;
+    torchAvailable.value = false;
+    torchOn.value = false;
     setMicActive(false);
     announce();
+  }
+
+  async function toggleTorch() {
+    const track = stream.value?.getVideoTracks()[0];
+    if (!track) return;
+    const next = !torchOn.value;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
+      torchOn.value = next;
+    } catch {
+      torchAvailable.value = false;
+      error.value = 'Этот телефон не даёт включить вспышку из браузера.';
+    }
   }
 
   onUnmounted(() => {
@@ -146,7 +167,7 @@ export function useBodyCamPublisher(socketRef: ShallowRef<Socket | null>, app: A
     socketRef.value?.off('cam:request', onRequest).off('cam:signal', onSignal).off('connect', announce);
   });
 
-  return { stream, viewers, error, starting, hasAudio, start, stop };
+  return { stream, viewers, error, starting, hasAudio, torchAvailable, torchOn, start, stop, toggleTorch };
 }
 
 // ------------------------------------------------------------------ viewer (operator / admin)

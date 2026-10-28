@@ -85,6 +85,13 @@ async function saveEdit(id: number, extracted: boolean) {
   <TPanel title="ПРЕДМЕТЫ МИССИИ" code="S-03">
     <template #actions><span class="a-sub">{{ loot.length }} · {{ cr(total) }} CR</span></template>
     <RouterLink to="/print" target="_blank" class="print mono">▤ ПЕЧАТЬ И СКАЧИВАНИЕ QR-МЕТОК</RouterLink>
+    <div class="row radar">
+      <span class="grow a-sub">SCRAP RADAR: {{ state?.mission?.scrapRadar ? 'установлен — оператор и экипаж видят весь лут' : 'нет — оператор видит только отсканированное' }}</span>
+      <TButton size="sm" variant="ghost" :confirm="state?.mission?.scrapRadar ? 'ОТКЛЮЧИТЬ?' : 'ВЫДАТЬ?'" :busy="busy.has('radar')" @click="act('radar', 'PATCH', '/missions/current', { scrapRadar: !state?.mission?.scrapRadar })">
+        {{ state?.mission?.scrapRadar ? 'ЗАБРАТЬ' : 'ВЫДАТЬ' }}
+      </TButton>
+    </div>
+    <p class="a-note">Оператор засчитывает только отсканированные предметы. Вы можете засчитать любой (кнопка EXTRACT у предмета), например если метка потерялась.</p>
     <div v-if="!loot.length" class="empty">// НЕТ ПРЕДМЕТОВ</div>
     <div v-for="l in loot" :key="l.id" class="a-item">
       <div class="row" @click="toggle(l.id)">
@@ -137,6 +144,9 @@ async function saveEdit(id: number, extracted: boolean) {
 }
 .a-item > .row:first-child {
   cursor: pointer;
+}
+.radar {
+  margin-bottom: 8px;
 }
 .print {
   display: flex;

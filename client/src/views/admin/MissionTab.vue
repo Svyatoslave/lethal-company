@@ -57,7 +57,7 @@ function save() {
     <div class="a-kv"><span>Время рейда</span><span>{{ mmss(missionElapsed(m, now)) }}</span></div>
     <div class="a-kv"><span>Старт</span><span>{{ clock(m.startedAt) }}</span></div>
     <div class="a-kv"><span>Квота</span><span>{{ cr(state?.quotaProgress ?? 0) }} / {{ cr(m.quota) }} CR</span></div>
-    <div class="a-kv"><span>Предметы</span><span>{{ state?.lootStats.found }} найдено · {{ state?.lootStats.extracted }} извлечено · {{ state?.lootStats.total }} всего</span></div>
+    <div class="a-kv"><span>Предметы</span><span>{{ state?.lootStats.found }} найдено · {{ state?.lootStats.extracted }} извлечено · {{ state?.lootStats.total ?? '?' }} всего</span></div>
     <div class="stack top">
       <TButton v-if="m.status === 'draft'" variant="solid" size="xl" block :busy="busy.has('start')" @click="act('start', 'POST', '/missions/current/start', undefined, 'Миссия запущена')">
         ▶ ЗАПУСТИТЬ МИССИЮ

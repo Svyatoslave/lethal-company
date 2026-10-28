@@ -18,7 +18,7 @@ function testSignal() {
   beep('radio');
   vibrate(300);
 }
-import { CREW_LABEL, CREW_TONE, GATE_TONE, MISSION_LABEL, MISSION_TONE, clock, cr } from '../lib/format';
+import { CREW_LABEL, CREW_TONE, GATE_TONE, LOOT_TONE, MISSION_LABEL, MISSION_TONE, clock, cr } from '../lib/format';
 import AlertLayer from '../components/AlertLayer.vue';
 import Logo from '../components/Logo.vue';
 import MessageList from '../components/MessageList.vue';
@@ -328,6 +328,10 @@ onMounted(async () => {
             Оператор может видеть<template v-if="cam.hasAudio.value"> и слышать</template> вас, когда подключается. Вы его не слышите.
             Держите телефон камерой вперёд и не блокируйте экран.
           </p>
+          <TButton v-if="cam.torchAvailable.value" :variant="cam.torchOn.value ? 'solid' : 'warn'" size="lg" block @click="cam.toggleTorch">
+            {{ cam.torchOn.value ? '◉ ФОНАРИК ВКЛ' : '○ ВКЛЮЧИТЬ ФОНАРИК' }}
+          </TButton>
+          <p v-else class="mute small">Фонарик (вспышка) на этом телефоне из браузера недоступен — пользуйтесь обычным фонарём.</p>
           <TButton variant="ghost" block @click="cam.stop">ВЫКЛЮЧИТЬ КАМЕРУ</TButton>
         </template>
         <template v-else>
@@ -378,6 +382,19 @@ onMounted(async () => {
         </div>
         <Meter :value="state?.quotaProgress ?? 0" :max="m?.quota ?? 1" :segments="16" tone="amber" />
       </section>
+
+      <section v-if="m?.scrapRadar" class="card">
+        <div class="row">
+          <span class="label grow">SCRAP RADAR · ОБЪЕКТЫ МИССИИ</span>
+          <span class="mono small dim">{{ state?.manifest.filter((l) => l.status === 'available').length ?? 0 }} НЕ НАЙДЕНО</span>
+        </div>
+        <div v-for="l in state?.manifest ?? []" :key="l.id" class="find mono" :class="{ gone: l.status !== 'available' }">
+          <span>{{ l.code }}</span><span class="grow ellipsis">{{ l.name }}</span>
+          <span class="acc">{{ cr(l.value) }}</span>
+          <TChip :label="l.status" :tone="LOOT_TONE[l.status]" />
+        </div>
+      </section>
+      <p v-else class="mute small radarhint">Сколько металлолома на объекте и где он — неизвестно. Компания продаёт SCRAP RADAR.</p>
 
       <section v-if="state?.loot.length" class="card">
         <div class="label">МОИ НАХОДКИ</div>
@@ -572,6 +589,13 @@ onMounted(async () => {
 }
 .target :deep(.btn) {
   min-width: 110px;
+}
+.find.gone {
+  opacity: 0.5;
+}
+.radarhint {
+  margin: 0;
+  padding: 0 4px;
 }
 .scanlock {
   margin-top: -4px;

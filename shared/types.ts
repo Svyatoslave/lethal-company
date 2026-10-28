@@ -32,6 +32,8 @@ export interface MissionView {
   commsRadio: boolean;
   commsDisabled: boolean;
   camsUnlocked: boolean;
+  /** SCRAP RADAR bought: operator and crew see every scrap object, not only scanned ones. */
+  scrapRadar: boolean;
   messageDelaySec: number;
   timeBonusSec: number;
   pauseReason: string | null;
@@ -200,11 +202,14 @@ export interface Snapshot {
   raidActive: boolean;
   balance: number;
   quotaProgress: number;
-  lootStats: { total: number; found: number; extracted: number };
+  /** total is null when the viewer may not know how much scrap exists (no SCRAP RADAR). */
+  lootStats: { total: number | null; found: number; extracted: number };
   expedition: ExpeditionView | null;
   players: PlayerView[];
   health: HealthEventView[];
   loot: LootView[];
+  /** Crew only, after SCRAP RADAR: every scrap object of the mission. */
+  manifest: LootView[];
   transactions: TxView[];
   shop: ShopItemView[];
   purchases: PurchaseView[];
