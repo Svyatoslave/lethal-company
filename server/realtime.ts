@@ -2,7 +2,7 @@ import type http from 'node:http';
 import type https from 'node:https';
 import { Server, type Socket } from 'socket.io';
 import { actorFor } from './auth.js';
-import { bus, currentMission, type Actor, type FxTarget } from './game.js';
+import { bus, currentMission, isInfected, type Actor, type FxTarget } from './game.js';
 import { presence } from './presence.js';
 import { playerSnapshot, staffSnapshot } from './snapshot.js';
 import type { FxEvent, FxName, Snapshot } from '../shared/types.js';
@@ -27,7 +27,13 @@ export function scheduleBroadcast() {
     timer = null;
     const cache = new Map<string, Snapshot>();
     for (const socket of io!.of('/').sockets.values()) {
-      const actor = socket.data.actor as Actor;
+      const actor = actorFor(socket.handshake.auth?.token) ?? socket.data.actor as Actor;
+      const previous = socket.data.actor as Actor;
+      socket.data.actor = actor;
+      if (actor.role === 'player' && actor.playerRole !== previous.playerRole) {
+        void socket.leave(actor.playerRole === 'monster' ? 'crew' : 'monsters');
+        void socket.join(actor.playerRole === 'monster' ? 'monsters' : 'crew');
+      }
       socket.emit('state', snapshotFor(actor, cache));
     }
   }, 40);
@@ -54,6 +60,7 @@ function bindBodyCam(socket: Socket, actor: Actor) {
     const m = currentMission();
     if (!m || !m.cams_unlocked) return 'BODY CAM НЕ КУПЛЕНА';
     if (m.comms_disabled) return 'СИГНАЛ ПОТЕРЯН';
+    if (actor.role === 'player' && isInfected(m.id, actor.playerId!)) return 'СИГНАЛ ПОТЕРЯН';
     return null;
   };
 
@@ -71,6 +78,8 @@ function bindBodyCam(socket: Socket, actor: Actor) {
     if (actor.role === 'player' || typeof p?.playerId !== 'number') return;
     const blocked = camAllowed();
     if (blocked) return void socket.emit('cam:error', { playerId: p.playerId, error: blocked });
+    const m = currentMission();
+    if (m && isInfected(m.id, p.playerId)) return void socket.emit('cam:error', { playerId: p.playerId, error: 'SIGNAL LOST' });
     io!.to(`player:${p.playerId}`).emit('cam:request', { from: socket.id });
   });
 
@@ -80,8 +89,12 @@ function bindBodyCam(socket: Socket, actor: Actor) {
     const other = target?.data.actor as Actor | undefined;
     if (!target || !other) return;
     if (actor.role === 'player' && other.role !== 'player') {
+      const m = currentMission();
+      if (m && isInfected(m.id, actor.playerId!)) return;
       target.emit('cam:signal', { from: socket.id, playerId: actor.playerId, data: p.data });
     } else if (actor.role !== 'player' && other.role === 'player') {
+      const m = currentMission();
+      if (m && isInfected(m.id, other.playerId!)) return;
       target.emit('cam:signal', { from: socket.id, data: p.data });
     }
   });

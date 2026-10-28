@@ -267,6 +267,12 @@ if (!missionCols.some((c) => c.name === 'overdue_damage')) {
     description = 'Восстанавливает здоровье выбранного сотрудника (+% HP в параметре эффекта).'
     WHERE key = 'medkit' AND effect_value = 1`);
 }
+if (!missionCols.some((c) => c.name === 'infection_mode')) {
+  db.exec('ALTER TABLE missions ADD COLUMN infection_mode INTEGER NOT NULL DEFAULT 0');
+}
+if (!missionCols.some((c) => c.name === 'infection_hits_required')) {
+  db.exec('ALTER TABLE missions ADD COLUMN infection_hits_required INTEGER NOT NULL DEFAULT 1');
+}
 
 // House rule: one MEDKIT heals 25% (was 50%). Only rows still at an old default are touched, so a price/effect
 // the admin set on purpose is kept. Runs once.
@@ -294,6 +300,24 @@ CREATE TABLE IF NOT EXISTS health_events (
   idem_key TEXT UNIQUE,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS infections (
+  id INTEGER PRIMARY KEY,
+  mission_id INTEGER NOT NULL REFERENCES missions(id),
+  player_id INTEGER NOT NULL REFERENCES players(id),
+  infected_by INTEGER REFERENCES players(id),
+  request_id TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  UNIQUE (mission_id, player_id)
+);
+CREATE TABLE IF NOT EXISTS infection_hits (
+  id INTEGER PRIMARY KEY,
+  mission_id INTEGER NOT NULL REFERENCES missions(id),
+  target_player_id INTEGER NOT NULL REFERENCES players(id),
+  attacker_player_id INTEGER REFERENCES players(id),
+  request_id TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_infection_hits_target ON infection_hits (mission_id, target_player_id);
 `);
 
 const cache = new Map<string, StatementSync>();

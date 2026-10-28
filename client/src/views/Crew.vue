@@ -74,6 +74,8 @@ const scan = ref<{ ok: boolean; title: string; data?: ClaimResult; error?: strin
 const me = computed(() => state.value?.me ?? null);
 const m = computed(() => state.value?.mission ?? null);
 const myRow = computed(() => state.value?.players.find((p) => p.id === me.value?.playerId) ?? null);
+const infected = computed(() => me.value?.role === 'crew' && !!myRow.value?.infected);
+const threat = computed(() => me.value?.role === 'monster' || infected.value);
 const status = computed(() => myRow.value?.status ?? 'AT_BASE');
 const exp = computed(() => state.value?.expedition ?? null);
 const myHp = computed(() => myRow.value?.hp ?? 100);
@@ -97,13 +99,17 @@ const scanLock = computed(() => {
   return null;
 });
 const fieldCrew = computed(() => state.value?.players.filter((p) => p.role === 'crew' && p.status !== 'AT_BASE') ?? []);
-const targets = computed(() => fieldCrew.value.filter((p) => ['OUTSIDE', 'RETURNING', 'OVERDUE'].includes(p.status)));
+const targets = computed(() => fieldCrew.value.filter((p) => p.id !== me.value?.playerId && !p.infected && ['OUTSIDE', 'RETURNING', 'OVERDUE'].includes(p.status)));
 const rage = computed(() => (m.value?.monsterDamage ?? 0) >= 100);
 async function hit(playerId: number) {
-  const r = await act<{ hp: number; duplicate: boolean }>(`hit${playerId}`, 'POST', '/monster/hit', { targetPlayerId: playerId, requestId: requestId() });
+  const r = await act<{ hp: number; duplicate: boolean; infected: boolean; hits?: number; hitsRequired?: number }>(`hit${playerId}`, 'POST', '/monster/hit', { targetPlayerId: playerId, requestId: requestId() });
   if (r) {
     vibrate(200);
-    toast(`Удар засчитан. Здоровье цели: ${r.hp}%`, 'warn');
+    toast(r.infected
+      ? 'Контакт подтверждён. Связь с целью потеряна.'
+      : m.value?.infectionMode
+        ? `Контакт подтверждён: ${r.hits ?? 0}/${r.hitsRequired ?? m.value.infectionHitsRequired}`
+        : `Удар засчитан. Здоровье цели: ${r.hp}%`, 'warn');
   }
 }
 
@@ -204,10 +210,10 @@ onMounted(async () => {
   </div>
 
   <!-- DEVICE -->
-  <div v-else class="dev" :class="{ monster: me?.role === 'monster' }">
+  <div v-else class="dev" :class="{ monster: threat }">
     <header class="hd">
       <div class="who">
-        <span class="label">{{ me?.role === 'monster' ? 'THREAT UNIT' : 'EMPLOYEE' }}</span>
+        <span class="label">{{ infected ? 'SIGNAL LOST' : me?.role === 'monster' ? 'THREAT UNIT' : 'EMPLOYEE' }}</span>
         <b class="mono">{{ me?.callsign ?? '…' }}</b>
       </div>
       <span class="link mono" :class="{ on: connected }"><i />{{ connected ? 'LINK' : 'NO LINK' }}</span>
@@ -228,14 +234,14 @@ onMounted(async () => {
     </div>
 
     <!-- MONSTER -->
-    <template v-if="me?.role === 'monster'">
+    <template v-if="threat">
       <section class="card dmg" :class="{ rage }">
         <div class="row">
-          <span class="label grow">ВАШ УРОН</span>
-          <b class="mono dmgv">{{ m?.monsterDamage ?? 0 }}% HP ЗА УДАР</b>
+          <span class="label grow">{{ infected ? 'СТАТУС: ЗАРАЖЁН' : 'ВАШ УРОН' }}</span>
+          <b class="mono dmgv">{{ m?.infectionMode ? 'РАСПРОСТРАНЕНИЕ' : `${m?.monsterDamage ?? 0}% HP ЗА УДАР` }}</b>
         </div>
-        <p v-if="rage" class="raget mono blink">ЯРОСТЬ: ОДИН УДАР СМЕРТЕЛЕН</p>
-        <p class="mute small">Вы действуете сами. Коснулись сотрудника — сразу отметьте удар. Отмечайте только реальное касание.</p>
+        <p v-if="rage && !m?.infectionMode" class="raget mono blink">ЯРОСТЬ: ОДИН УДАР СМЕРТЕЛЕН</p>
+        <p class="mute small">{{ infected ? 'Связь с оператором потеряна. Коснитесь другого сотрудника за шлюзом и сразу отметьте контакт.' : 'Вы действуете сами. Коснулись сотрудника — сразу отметьте удар. Отмечайте только реальное касание.' }}</p>
       </section>
 
       <section class="card">
@@ -253,7 +259,7 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section class="card comms">
+      <section v-if="!infected" class="card comms">
         <div class="label">ЧАТ С ВЕДУЩИМ</div>
         <div class="mlist"><MessageList :messages="state?.messages ?? []" role="player" :now="now" /></div>
         <div class="quick">

@@ -13,7 +13,8 @@ import type {
 function missionView(m: MissionRow): MissionView {
   return {
     id: m.id, code: m.code, name: m.name, status: m.status as MissionView['status'], quota: m.quota,
-    startBalance: m.start_balance, durationSec: m.duration_sec, overdueDamage: m.overdue_damage, monsterDamage: m.monster_damage, crewSize: m.crew_size,
+    startBalance: m.start_balance, durationSec: m.duration_sec, overdueDamage: m.overdue_damage, monsterDamage: m.monster_damage,
+    infectionMode: !!m.infection_mode, infectionHitsRequired: m.infection_hits_required, crewSize: m.crew_size,
     gate: m.gate as MissionView['gate'], threatLevel: m.threat_level, commsRadio: !!m.comms_radio,
     commsDisabled: !!m.comms_disabled, camsUnlocked: !!m.cams_unlocked, scrapRadar: !!m.scrap_radar, messageDelaySec: m.message_delay_sec, timeBonusSec: m.time_bonus_sec,
     pauseReason: m.pause_reason, startedAt: m.started_at, pausedAt: m.paused_at, pausedTotalMs: m.paused_total_ms,
@@ -50,11 +51,13 @@ function playersView(m: MissionRow | undefined, exp: ExpeditionView | null, with
     m ? q.all<{ player_id: number; hp: number }>('SELECT player_id, hp FROM health WHERE mission_id = ?', m.id).map((r) => [r.player_id, r.hp]) : [],
   );
   const live = exp && exp.status !== 'completed' ? exp : null;
+  const infected = new Set(m ? q.all<{ player_id: number }>('SELECT player_id FROM infections WHERE mission_id = ?', m.id).map((r) => r.player_id) : []);
   return rows.map((p) => {
     const ep = live?.players.find((x) => x.playerId === p.id);
     return {
       id: p.id, callsign: p.callsign, role: p.role as PlayerRole, joinCode: withCodes ? p.join_code : undefined,
       status: ep ? EP_TO_CREW[ep.status] : 'AT_BASE', hp: hp.get(p.id) ?? 100, online: presence.isOnline(p.id), camOn: presence.isCamOn(p.id),
+      infected: infected.has(p.id), linkLost: false,
       exitAt: ep?.exitAt ?? null, deadlineAt: ep?.deadlineAt ?? null,
     };
   });
@@ -168,6 +171,9 @@ export function staffSnapshot(role: 'admin' | 'operator'): Snapshot {
   s.lootStats = lootStats(m.id, seeAll);
   s.expedition = exp ? expeditionView(exp) : null;
   s.players = playersView(m, s.expedition, isAdmin);
+  if (!isAdmin) s.players = s.players.map((p) => p.infected ? {
+    ...p, infected: false, linkLost: true, online: false, camOn: false, exitAt: null, deadlineAt: null,
+  } : p);
   s.health = healthView(m.id, '1 = 1', [], 200);
   s.loot = q.all<LootRow & { callsign: string | null }>(ALL_LOOT, m.id)
     .filter((l) => seeAll || l.status !== 'available')
@@ -217,9 +223,10 @@ export function playerSnapshot(playerId: number): Snapshot {
   s.manifest = p.role === 'crew' && m.scrap_radar ? q.all<LootRow & { callsign: string | null }>(ALL_LOOT, m.id).map(lootView) : [];
   const exp = latestExpedition(m.id);
   const ev = exp ? expeditionView(exp) : null;
-  // Crew see their own expedition only; monsters see the field roster to know who is out.
-  s.expedition = ev && (p.role === 'monster' || ev.players.some((x) => x.playerId === p.id)) ? ev : null;
-  s.players = playersView(m, ev, false).filter((x) => x.id === p.id || (p.role === 'monster' && x.role === 'crew'));
+  const infected = q.get('SELECT 1 FROM infections WHERE mission_id = ? AND player_id = ?', m.id, p.id);
+  // Crew see their own expedition only; monsters and infected players see the field roster to select valid targets.
+  s.expedition = ev && (p.role === 'monster' || infected || ev.players.some((x) => x.playerId === p.id)) ? ev : null;
+  s.players = playersView(m, ev, false).filter((x) => x.id === p.id || ((p.role === 'monster' || infected) && x.role === 'crew'));
   s.health = healthView(m.id, 'h.player_id = ?', [p.id], 30);
   s.loot = q.all<LootRow & { callsign: string | null }>(
     'SELECT l.*, p.callsign FROM loot l LEFT JOIN players p ON p.id = l.found_by WHERE l.mission_id = ? AND l.found_by = ? ORDER BY l.found_at DESC',

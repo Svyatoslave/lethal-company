@@ -74,7 +74,7 @@ function onKey(e: KeyboardEvent) {
           <span class="cs mono">{{ c.callsign }}</span>
           <span class="st">
             <i class="dot" :class="{ live: c.camOn }" />
-            <TChip :label="CREW_LABEL[c.status]" :tone="CREW_TONE[c.status]" />
+            <TChip :label="c.linkLost ? 'SIGNAL LOST' : CREW_LABEL[c.status]" :tone="c.linkLost ? 'crit' : CREW_TONE[c.status]" />
           </span>
         </button>
         <p class="hint">Камера появляется, когда сотрудник включает BODY CAM на своём телефоне. Звук слышен только у выбранного канала.</p>
@@ -88,6 +88,7 @@ function onKey(e: KeyboardEvent) {
         </template>
         <template v-else-if="mode === 'single'">
           <div v-if="!current" class="jam mono">ВЫБЕРИТЕ КАНАЛ</div>
+          <div v-else-if="current.linkLost" class="jam mono">▲ SIGNAL LOST<br /><small>СВЯЗЬ С {{ current.callsign }} ПОТЕРЯНА</small></div>
           <div v-else-if="!current.camOn" class="jam mono">CAM-{{ String(current.channel).padStart(2, '0') }} · {{ current.callsign }}<br /><small>КАМЕРА ВЫКЛЮЧЕНА</small></div>
           <CamFeed
             v-else :key="current.id" class="big" :socket="socket" :player-id="current.id" :callsign="current.callsign"

@@ -22,6 +22,13 @@ const rage = computed(() => (m.value?.monsterDamage ?? 0) >= 100);
 const customDamage = ref(50);
 watch(() => m.value?.monsterDamage, (d) => d !== undefined && (customDamage.value = d), { immediate: true });
 const setDamage = (d: number, ok: string) => act('dmg', 'PATCH', '/missions/current', { monsterDamage: d }, ok);
+const infectionHits = ref(1);
+watch(() => m.value?.infectionHitsRequired, (n) => n !== undefined && (infectionHits.value = n), { immediate: true });
+const setInfectionHits = () => act('ihits', 'PATCH', '/missions/current', { infectionHitsRequired: infectionHits.value }, `Контактов до заражения: ${infectionHits.value}`);
+const toggleInfection = () => act(
+  'imode', 'PATCH', '/missions/current', { infectionMode: !m.value?.infectionMode },
+  m.value?.infectionMode ? 'Режим заражения отключён' : 'Режим заражения включён',
+);
 
 // ---- overdue damage (same idea: a % of HP, announced to everyone when changed)
 const customOverdue = ref(50);
@@ -74,6 +81,19 @@ const KIND: Record<string, string> = { hit: 'УДАР', overdue: 'ОПОЗДАН
 </script>
 
 <template>
+  <TPanel title="РЕЖИМ ЗАРАЖЕНИЯ" code="T-0X" :tone="m?.infectionMode ? 'crit' : undefined">
+    <div class="row">
+      <div class="grow">
+        <b class="mono" :class="m?.infectionMode ? 'red' : 'dim'">{{ m?.infectionMode ? 'CONTAGION ACTIVE' : 'CONTAGION OFFLINE' }}</b>
+        <p class="a-note">Включается в любой момент миссии. При включении удары накапливают заражение вместо снятия HP.</p>
+      </div>
+      <TButton
+        :variant="m?.infectionMode ? 'danger' : 'solid'" size="lg" :busy="busy.has('imode')"
+        :confirm="m?.infectionMode ? 'ОТКЛЮЧИТЬ РЕЖИМ ЗАРАЖЕНИЯ?' : false" @click="toggleInfection"
+      >{{ m?.infectionMode ? 'ОТКЛЮЧИТЬ' : 'ВКЛЮЧИТЬ' }}</TButton>
+    </div>
+  </TPanel>
+
   <TPanel v-for="p in pending" :key="p.id" :title="p.itemName" code="REQ" tone="warn">
     <template v-if="p.itemKey === 'scanner'">
       <p class="a-note">Оператор купил сканер. Дайте подсказку: где опасность или где искать лут.</p>
@@ -87,6 +107,7 @@ const KIND: Record<string, string> = { hit: 'УДАР', overdue: 'ОПОЗДАН
   </TPanel>
 
   <TPanel title="УРОН МОНСТРОВ" code="T-00" :tone="rage ? 'crit' : undefined">
+    <div v-if="m?.infectionMode" class="a-note a-warn">РЕЖИМ ЗАРАЖЕНИЯ: удар не снимает HP. Цель теряет связь с оператором и может заражать других.</div>
     <div class="dmg mono" :class="{ rage }">{{ m?.monsterDamage ?? 0 }}% <small>HP ЗА УДАР</small></div>
     <div class="a-grid2">
       <TButton :variant="!rage ? 'solid' : 'ghost'" size="lg" :disabled="!m || m.monsterDamage === 50" :busy="busy.has('dmg')" @click="setDamage(50, 'Урон монстров: 50%')">ОБЫЧНЫЙ 50%</TButton>
@@ -97,6 +118,21 @@ const KIND: Record<string, string> = { hit: 'УДАР', overdue: 'ОПОЗДАН
       <TButton variant="ghost" :busy="busy.has('dmg')" @click="setDamage(customDamage, `Урон монстров: ${customDamage}%`)">ЗАДАТЬ %</TButton>
     </div>
     <p class="a-note top">Любое изменение урона объявляется всем устройствам. Ярость — для финала игры: один удар забирает всё здоровье.</p>
+  </TPanel>
+
+  <TPanel v-if="m?.infectionMode" title="ПОРОГ ЗАРАЖЕНИЯ" code="T-0H">
+    <div class="row">
+      <input v-model.number="infectionHits" class="input grow" type="number" min="1" max="20" />
+      <TButton :busy="busy.has('ihits')" @click="setInfectionHits">СОХРАНИТЬ</TButton>
+    </div>
+    <p class="a-note top">Сколько подтверждённых касаний нужно одной цели до заражения. Уже нанесённые контакты сохраняются.</p>
+  </TPanel>
+
+  <TPanel v-if="m?.infectionMode" title="ЗАРАЖЁННЫЕ" code="T-0I" tone="crit">
+    <div v-if="!crew.some((p) => p.infected)" class="empty">// ЗАРАЖЕНИЕ НЕ ОБНАРУЖЕНО</div>
+    <div v-for="p in crew.filter((x) => x.infected)" :key="p.id" class="ma mono">
+      <b class="red">INFECTED</b><span>{{ p.callsign }}</span><span class="dim">{{ p.status }}</span>
+    </div>
   </TPanel>
 
   <TPanel title="УРОН ЗА ОПОЗДАНИЕ" code="T-0B" :tone="(m?.overdueDamage ?? 0) >= 100 ? 'crit' : undefined">

@@ -9,7 +9,7 @@ export interface MissionRow {
   id: number; code: string; name: string; status: string; quota: number; start_balance: number;
   duration_sec: number; overdue_penalty: number; crew_size: number; gate: string; threat_level: number;
   comms_radio: number; comms_disabled: number; message_delay_sec: number; time_bonus_sec: number; cams_unlocked: number; scrap_radar: number;
-  overdue_damage: number; monster_damage: number;
+  overdue_damage: number; monster_damage: number; infection_mode: number; infection_hits_required: number;
   pause_reason: string | null; started_at: number | null; paused_at: number | null; paused_total_ms: number;
   ended_at: number | null; created_at: number;
 }
@@ -41,6 +41,10 @@ export interface PurchaseRow {
 }
 
 export interface Actor { role: Role; playerId: number | null; label: string; playerRole?: 'crew' | 'monster' }
+
+export function isInfected(missionId: number, playerId: number): boolean {
+  return !!q.get('SELECT 1 FROM infections WHERE mission_id = ? AND player_id = ?', missionId, playerId);
+}
 
 export interface TaskRow {
   id: number; mission_id: number; name: string; employee_text: string; operator_text: string;
@@ -259,9 +263,9 @@ export function createMission(o: MissionOpts, actor: Actor) {
     const code = `LN-${crypto.randomInt(1000, 10000)}`;
     // overdue_penalty (credits) is legacy: lateness now costs HP, so it is stored as 0.
     const id = q.run(
-      `INSERT INTO missions (code, name, quota, start_balance, duration_sec, overdue_penalty, overdue_damage, monster_damage, crew_size, created_at)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-      code, name, quota, startBalance, duration, overdueDamage, monsterDamage, crewSize, now(),
+      `INSERT INTO missions (code, name, quota, start_balance, duration_sec, overdue_penalty, overdue_damage, monster_damage, infection_mode, infection_hits_required, crew_size, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+      code, name, quota, startBalance, duration, overdueDamage, monsterDamage, 0, 1, crewSize, now(),
     ).id;
     seedShop(id);
     if (startBalance > 0) addTx(id, startBalance, 'start', 'Стартовый бюджет корпорации', actor.label, `start:${id}`);
@@ -355,6 +359,8 @@ export function updateMission(patch: Record<string, unknown>, actor: Actor) {
     if (patch.durationSec !== undefined) sets.push(['duration_sec', int(patch.durationSec, 'Длительность', 30, 6 * 3600)]);
     if (patch.overdueDamage !== undefined) sets.push(['overdue_damage', int(patch.overdueDamage, 'Урон за опоздание', 0, 100)]);
     if (patch.monsterDamage !== undefined) sets.push(['monster_damage', int(patch.monsterDamage, 'Урон монстра', 0, 100)]);
+    if (patch.infectionMode !== undefined) sets.push(['infection_mode', patch.infectionMode ? 1 : 0]);
+    if (patch.infectionHitsRequired !== undefined) sets.push(['infection_hits_required', int(patch.infectionHitsRequired, 'Удары до заражения', 1, 20)]);
     if (patch.crewSize !== undefined) sets.push(['crew_size', int(patch.crewSize, 'Размер группы', 1, 12)]);
     if (patch.messageDelaySec !== undefined) sets.push(['message_delay_sec', int(patch.messageDelaySec, 'Задержка', 0, 600)]);
     if (patch.timeBonusSec !== undefined) sets.push(['time_bonus_sec', int(patch.timeBonusSec, 'Бонус времени', 0, 6 * 3600)]);
@@ -393,6 +399,14 @@ export function updateMission(patch: Record<string, unknown>, actor: Actor) {
         title: rage ? 'МОНСТРЫ В ЯРОСТИ' : `УРОН МОНСТРОВ: ${d}%`,
         text: rage ? 'Один удар — 100% здоровья. Будьте предельно осторожны.' : `Один удар отнимает ${d}% здоровья.`,
       });
+    }
+    if (patch.infectionMode !== undefined && !!patch.infectionMode !== !!m.infection_mode) {
+      logEvent(m.id, 'THREAT', 'warn', patch.infectionMode ? 'Unknown contagion protocol enabled.' : 'Contagion protocol disabled.', 'admin', actor.label);
+      fx('system:alert', {
+        type: 'infection-mode', level: 'warn',
+        title: patch.infectionMode ? 'РЕЖИМ ЗАРАЖЕНИЯ АКТИВИРОВАН' : 'РЕЖИМ ЗАРАЖЕНИЯ ОТКЛЮЧЁН',
+        text: patch.infectionMode ? 'Контакт с угрозой приводит к заражению.' : 'Удары снова наносят урон здоровью.',
+      }, 'admin');
     }
     if (patch.commsRadio && !m.comms_radio) {
       logEvent(m.id, 'COMMS', 'ok', 'Signal established. Direct radio link online.', 'all', actor.label);
@@ -624,14 +638,39 @@ function maybeCompleteExpedition(m: MissionRow, expeditionId: number, actor: Act
   const exp = q.get<ExpeditionRow>('SELECT * FROM expeditions WHERE id = ?', expeditionId)!;
   if (exp.status !== 'active') return;
   const out = q.get<{ c: number }>(
-    "SELECT COUNT(*) AS c FROM expedition_players WHERE expedition_id = ? AND status IN ('outside','returning','overdue')", exp.id,
+    `SELECT COUNT(*) AS c FROM expedition_players ep
+     WHERE ep.expedition_id = ? AND ep.status IN ('outside','returning','overdue')
+       AND NOT EXISTS (SELECT 1 FROM infections i WHERE i.mission_id = ? AND i.player_id = ep.player_id)`,
+    exp.id, m.id,
   )!.c;
   const exited = q.get<{ c: number }>('SELECT COUNT(*) AS c FROM expedition_players WHERE expedition_id = ? AND exit_at IS NOT NULL', exp.id)!.c;
   if (out > 0 || exited === 0) return;
   q.run("DELETE FROM expedition_players WHERE expedition_id = ? AND status = 'ready'", exp.id);
   q.run("UPDATE expeditions SET status = 'completed', completed_at = ? WHERE id = ?", now(), exp.id);
-  logEvent(m.id, 'SYSTEM', 'ok', `Expedition #${exp.number} complete. All personnel accounted for.`, 'all', actor.label);
-  fx('mission:updated', { type: 'expedition', level: 'ok', title: `EXPEDITION #${exp.number} COMPLETE`, text: 'Весь экипаж на базе' });
+  const promoted = q.all<{ callsign: string }>(
+    `SELECT p.callsign FROM players p JOIN infections i ON i.player_id = p.id
+     JOIN expedition_players ep ON ep.player_id = p.id
+     WHERE i.mission_id = ? AND ep.expedition_id = ? AND p.role = 'crew'`,
+    m.id, exp.id,
+  );
+  q.run(
+    `UPDATE players SET role = 'monster' WHERE role = 'crew' AND id IN (
+       SELECT i.player_id FROM infections i JOIN expedition_players ep ON ep.player_id = i.player_id
+       WHERE i.mission_id = ? AND ep.expedition_id = ?
+     )`,
+    m.id, exp.id,
+  );
+  const losses = promoted.length;
+  logEvent(m.id, losses ? 'THREAT' : 'SYSTEM', losses ? 'crit' : 'ok',
+    losses
+      ? `Expedition #${exp.number} complete. Lost personnel converted: ${promoted.map((p) => p.callsign).join(', ')}.`
+      : `Expedition #${exp.number} complete. All personnel accounted for.`,
+    'staff', actor.label);
+  fx('mission:updated', {
+    type: losses ? 'expedition-infected' : 'expedition', level: losses ? 'crit' : 'ok',
+    title: losses ? `EXPEDITION #${exp.number} LOST` : `EXPEDITION #${exp.number} COMPLETE`,
+    text: losses ? 'Заражённые сотрудники перешли на сторону угрозы' : 'Весь экипаж на базе',
+  });
 }
 
 export function confirmReturn(playerId: unknown, actor: Actor) {
@@ -746,16 +785,48 @@ const HIT_COOLDOWN_MS = 10_000;
 /** A monster reports that it touched/tagged a crew member. Damage is the mission's monster_damage percent. */
 export function monsterHit(o: { targetPlayerId?: unknown; requestId?: unknown }, actor: Actor) {
   return mutate(() => {
-    if (actor.role !== 'player' || actor.playerRole !== 'monster') fail(403, 'Отмечать удары может только монстр');
     const m = mustMission();
     requireRunning(m);
+    const infectedAttacker = actor.role === 'player' && actor.playerRole !== 'monster' && actor.playerId !== null && isInfected(m.id, actor.playerId);
+    if (actor.role !== 'player' || (actor.playerRole !== 'monster' && !infectedAttacker)) fail(403, 'Отмечать удары может только монстр или заражённый');
+    if (infectedAttacker && !inField(m, actor.playerId!)) fail(409, 'Атаковать можно только за шлюзом');
     if (typeof o.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(o.requestId)) fail(400, 'Нет идентификатора запроса');
     const target = mustPlayer(o.targetPlayerId);
     if (target.role !== 'crew') fail(409, 'Цель не является сотрудником экипажа');
+    if (target.id === actor.playerId) fail(409, 'Нельзя атаковать себя');
     if (!inField(m, target.id)) fail(409, `${target.callsign} не за шлюзом`);
+    const pair = `${actor.playerId}:${target.id}`;
+    if (m.infection_mode) {
+      const previousHit = q.get('SELECT 1 FROM infection_hits WHERE request_id = ?', o.requestId);
+      const hitsBefore = q.get<{ c: number }>('SELECT COUNT(*) AS c FROM infection_hits WHERE mission_id = ? AND target_player_id = ?', m.id, target.id)!.c;
+      if (previousHit) return { duplicate: true, hp: hpOf(m.id, target.id), infected: isInfected(m.id, target.id), hits: hitsBefore, hitsRequired: m.infection_hits_required };
+      if (isInfected(m.id, target.id)) fail(409, `${target.callsign}: связь уже потеряна`);
+      if ((lastHit.get(pair) ?? 0) > now() - HIT_COOLDOWN_MS) fail(429, 'Контакт с этой целью уже отмечен. Подождите 10 секунд.');
+      q.run('INSERT INTO infection_hits (mission_id, target_player_id, attacker_player_id, request_id, created_at) VALUES (?, ?, ?, ?, ?)', m.id, target.id, actor.playerId, o.requestId, now());
+      lastHit.set(pair, now());
+      const hits = hitsBefore + 1;
+      if (hits < m.infection_hits_required) {
+        logEvent(m.id, 'THREAT', 'info', `Contagion contact: ${target.callsign} (${hits}/${m.infection_hits_required})`, 'admin', actor.label);
+        fx('monster:event', { type: 'infection-hit', level: 'warn', title: 'КОНТАКТ С УГРОЗОЙ', text: `Заражение: ${hits}/${m.infection_hits_required}`, targetPlayerId: target.id }, { playerId: target.id });
+        return { duplicate: false, hp: hpOf(m.id, target.id), infected: false, hits, hitsRequired: m.infection_hits_required };
+      }
+      q.run('INSERT INTO infections (mission_id, player_id, infected_by, request_id, created_at) VALUES (?, ?, ?, ?, ?)', m.id, target.id, actor.playerId, o.requestId, now());
+      q.run(
+        `UPDATE expedition_players SET deadline_at = NULL
+         WHERE player_id = ? AND expedition_id IN (SELECT id FROM expeditions WHERE mission_id = ? AND status = 'active')`,
+        target.id, m.id,
+      );
+      logEvent(m.id, 'COMMS', 'crit', `Signal lost: ${target.callsign}.`, 'staff');
+      logEvent(m.id, 'THREAT', 'crit', `${target.callsign} infected by ${actor.label}`, 'admin', actor.label);
+      fx('monster:event', { type: 'infected', level: 'crit', title: 'СВЯЗЬ ПОТЕРЯНА', text: 'Вы заражены. Теперь вы можете заражать других сотрудников.', targetPlayerId: target.id }, { playerId: target.id });
+      fx('monster:event', { type: 'signal-lost', level: 'crit', title: `${target.callsign}: SIGNAL LOST` }, 'operator');
+      fx('monster:event', { type: 'infected', level: 'crit', title: `${target.callsign} ЗАРАЖЁН`, text: `Источник: ${actor.label}` }, 'admin');
+      const exp = currentExpedition(m.id);
+      if (exp) maybeCompleteExpedition(m, exp.id, actor);
+      return { duplicate: false, hp: hpOf(m.id, target.id), infected: true, hits, hitsRequired: m.infection_hits_required };
+    }
     if (hpOf(m.id, target.id) <= 0) fail(409, `${target.callsign} уже выведен из строя`);
     // Different request ids for the same target within seconds are almost always a double tap.
-    const pair = `${actor.playerId}:${target.id}`;
     const dup = q.get('SELECT 1 FROM health_events WHERE idem_key = ?', `hit:${o.requestId}`);
     if (!dup && (lastHit.get(pair) ?? 0) > now() - HIT_COOLDOWN_MS) fail(429, 'Удар по этой цели уже отмечен. Подождите 10 секунд.');
     // The reason is shown to the victim; who hit is kept in `actor` (admin-only views).
@@ -767,7 +838,7 @@ export function monsterHit(o: { targetPlayerId?: unknown; requestId?: unknown },
     fx('monster:event', { type: 'hit', level: 'crit', title: 'ВЫ РАНЕНЫ', text: `Здоровье: ${r.after}%`, targetPlayerId: target.id }, { playerId: target.id });
     fx('monster:event', { type: 'hit', level: 'warn', title: `${target.callsign} РАНЕН`, text: `HP ${r.after}%` }, 'operator');
     fx('monster:event', { type: 'hit', level: 'warn', title: `${target.callsign} РАНЕН`, text: `HP ${r.after}% · ${actor.label}` }, 'admin');
-    return { duplicate: false, hp: r.after };
+    return { duplicate: false, hp: r.after, infected: false };
   });
 }
 
@@ -1400,6 +1471,7 @@ export function sendMessage(o: { toType?: unknown; toPlayerId?: unknown; body?: 
     } else if (actor.role === 'operator') {
       if (toType === 'operator') fail(400, 'Нельзя отправить себе');
       if (toPlayer?.role === 'monster') fail(403, 'Нет связи с этим объектом');
+      if (toPlayer && isInfected(m.id, toPlayer.id)) fail(403, 'SIGNAL LOST. Связь с сотрудником потеряна.');
       if (toType === 'admin') insertMessage(m, actor, 'admin', null, body, 'relay', t);
       else {
         if (!m.comms_radio) fail(403, 'НЕТ СВЯЗИ. Купите RADIO или используйте курьера.');
@@ -1407,6 +1479,7 @@ export function sendMessage(o: { toType?: unknown; toPlayerId?: unknown; body?: 
         insertMessage(m, actor, toType, toPlayer?.id ?? null, body, 'radio', t + m.message_delay_sec * 1000);
       }
     } else {
+      if (actor.playerId !== null && isInfected(m.id, actor.playerId)) fail(403, 'SIGNAL LOST. Канал связи недоступен.');
       if (toType !== 'operator') fail(403, 'Сотрудник может связаться только с оператором');
       if (!radioUp) fail(403, m.comms_radio ? 'СИГНАЛ ПОТЕРЯН' : 'НЕТ СВЯЗИ');
       insertMessage(m, actor, 'operator', null, body, 'radio', t + m.message_delay_sec * 1000);
