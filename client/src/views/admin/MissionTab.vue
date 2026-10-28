@@ -98,7 +98,7 @@ function save() {
         <label class="field"><span class="label">Удар монстра, −% HP</span><input v-model.number="draft.monsterDamage" class="input" type="number" min="0" max="100" /></label>
         <label class="field"><span class="label">Размер группы</span><input v-model.number="draft.crewSize" class="input" type="number" min="1" max="12" /></label>
       </div>
-      <label v-if="m" class="check"><input v-model="draft.copyLoot" type="checkbox" /> Перенести предметы (те же QR-метки)</label>
+      <label v-if="m" class="check"><input v-model="draft.copyLoot" type="checkbox" /> Перенести предметы и задания-терминалы (те же QR-метки)</label>
       <TButton variant="solid" size="lg" block :busy="busy.has('create')" @click="create">СОЗДАТЬ МИССИЮ</TButton>
     </form>
   </TPanel>

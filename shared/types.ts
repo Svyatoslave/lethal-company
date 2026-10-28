@@ -181,8 +181,12 @@ export interface MonsterActionView {
 export interface TaskView {
   id: number;
   name: string;
-  status: 'available' | 'active' | 'completed';
+  status: 'available' | 'active' | 'completed' | 'locked';
   reward: number;
+  /** 0 = unlimited. */
+  maxAttempts: number;
+  /** Wrong answers so far on this terminal. */
+  attempts: number;
   playerId: number | null;
   callsign: string | null;
   employeeText: string;

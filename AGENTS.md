@@ -85,6 +85,8 @@ client/src/views/          Operator.vue (+ operator/*), Admin.vue (+ admin/* tab
 - Comms: before RADIO, admin → operator ("relay") and admin → crew ("system" notices) only (admin ⇄ monster chat is separate and always on); after RADIO, operator ⇄ players with optional delay; admin can jam (`comms_disabled`), which also blocks cameras.
 - Body cams: player opts in on their phone; video + mic are **send-only** (the player never hears the operator). Operator switches channels in the monitor. Signaling only between a player socket and a staff socket.
 
+- Terminals (`tasks`, cooperative crew ⇄ operator codes): QR tokens are unique per mission (`UNIQUE(mission_id, token)`, same as loot). `max_attempts` (0 = unlimited) caps wrong answers per terminal; reaching it sets status `locked` (no reward, cannot be re-activated) until the admin releases it, which also resets `attempts`. Unlimited terminals keep the original wrong-answer reply `{ correct: false, already: false }` (tests/tasks.test.ts relies on it). Creating a mission with `copyLoot` copies loot and terminals with the same tokens in a fresh state.
+
 ## Conventions
 
 - Match surrounding code: small focused functions, comments only where intent is non-obvious, English identifiers/comments.

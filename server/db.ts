@@ -193,13 +193,16 @@ CREATE TABLE IF NOT EXISTS tasks (
   operator_text TEXT NOT NULL,
   answer TEXT NOT NULL,
   reward INTEGER NOT NULL DEFAULT 0,
-  token TEXT NOT NULL UNIQUE,
+  token TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'available',
   player_id INTEGER REFERENCES players(id),
   started_at INTEGER,
   completed_at INTEGER,
   last_attempt_at INTEGER,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  max_attempts INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (mission_id, token)
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_mission ON tasks (mission_id, id);
 CREATE INDEX IF NOT EXISTS idx_tx_mission ON transactions (mission_id, id);
@@ -207,6 +210,42 @@ CREATE INDEX IF NOT EXISTS idx_msg_mission ON messages (mission_id, deliver_at);
 `);
 
 // Additive migrations for databases created by earlier versions.
+
+// Terminals: a QR token used to be unique across all missions, so a new mission could not reuse printed
+// terminal labels. Rebuild once with per-mission uniqueness (like loot) plus the attempt limit columns.
+const tasksSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'").get() as { sql: string } | undefined)?.sql ?? '';
+if (/token TEXT NOT NULL UNIQUE/.test(tasksSql)) {
+  db.exec(`
+    BEGIN;
+    CREATE TABLE tasks_new (
+      id INTEGER PRIMARY KEY,
+      mission_id INTEGER NOT NULL REFERENCES missions(id),
+      name TEXT NOT NULL,
+      employee_text TEXT NOT NULL,
+      operator_text TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      reward INTEGER NOT NULL DEFAULT 0,
+      token TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'available',
+      player_id INTEGER REFERENCES players(id),
+      started_at INTEGER,
+      completed_at INTEGER,
+      last_attempt_at INTEGER,
+      created_at INTEGER NOT NULL,
+      max_attempts INTEGER NOT NULL DEFAULT 0,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (mission_id, token)
+    );
+    INSERT INTO tasks_new (id, mission_id, name, employee_text, operator_text, answer, reward, token, status, player_id,
+                           started_at, completed_at, last_attempt_at, created_at)
+      SELECT id, mission_id, name, employee_text, operator_text, answer, reward, token, status, player_id,
+             started_at, completed_at, last_attempt_at, created_at FROM tasks;
+    DROP TABLE tasks;
+    ALTER TABLE tasks_new RENAME TO tasks;
+    CREATE INDEX IF NOT EXISTS idx_tasks_mission ON tasks (mission_id, id);
+    COMMIT;
+  `);
+}
 const lootCols = db.prepare('PRAGMA table_info(loot)').all() as { name: string }[];
 if (!lootCols.some((c) => c.name === 'description')) {
   db.exec("ALTER TABLE loot ADD COLUMN description TEXT NOT NULL DEFAULT ''");
